@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# 环境与密钥
+.env
+.env.*
+
+# 数据与索引（项目位于子目录 kbase-agent/，用 **/ 前缀匹配任意层级）
+**/data/chroma/
+**/data/raw/
+**/data/business/
+*.db
+
+# IDE
+.idea/
+.vscode/
+.DS_Store

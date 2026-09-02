@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kbase-agent · 企业知识库 + 工具调用 Agent</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: #0f1419; color: #e6e6e6; height: 100vh; display: flex; flex-direction: column;
+  }
+  header { padding: 14px 20px; border-bottom: 1px solid #262d36; background: #151b23; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header p { font-size: 12px; color: #8b98a5; margin-top: 2px; }
+  #log { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+  .user { align-self: flex-end; background: #1d4ed8; border-bottom-right-radius: 4px; }
+  .bot  { align-self: flex-start; background: #1c242e; border-bottom-left-radius: 4px; }
+  .sources { margin-top: 8px; font-size: 12px; color: #7dd3fc; }
+  .sources span { background: #123a4f; padding: 2px 8px; border-radius: 10px; margin-right: 6px; white-space: nowrap; }
+  #status { display: none; font-size: 12px; color: #fbbf24; padding: 0 20px 8px; }
+  #chips { display: flex; gap: 8px; padding: 0 20px 10px; flex-wrap: wrap; }
+  #chips button { background: #1c242e; color: #cbd5e1; border: 1px solid #2a3441; border-radius: 14px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer; }
+  #chips button:hover { border-color: #3b82f6; color: #fff; }
+  footer { display: flex; gap: 10px; padding: 12px 20px; border-top: 1px solid #262d36; background: #151b23; }
+  #input { flex: 1; background: #1c242e; border: 1px solid #2a3441; border-radius: 10px; color: #e6e6e6;
+    padding: 10px 14px; font-size: 14px; outline: none; }
+  #input:focus { border-color: #3b82f6; }
+  #send { background: #2563eb; color: #fff; border: none; border-radius: 10px; padding: 0 22px; cursor: pointer; font-size: 14px; }
+  #send:disabled { opacity: .5; cursor: not-allowed; }
+  .err { color: #f87171; }
+</style>
+</head>
+<body>
+<header>
+  <h1>kbase-agent 演示</h1>
+  <p>LangGraph 有状态 Agent · MCP 工具接入 · 混合检索 RAG · DeepSeek</p>
+</header>
+<div id="log"></div>
+<div id="status">Agent 思考中…（可能需要多步工具调用）</div>
+<div id="chips">
+  <button data-q="我今年还剩几天年假？按手册规则能结转吗？">年假 & 结转规则</button>
+  <button data-q="张三还剩几天年假？结合制度规则回答">查张三个人数据</button>
+  <button data-q="出差住宿报销上限是多少？">报销标准</button>
+</div>
+<footer>
+  <input id="input" placeholder="输入问题，Enter 发送（如：我今年还剩几天年假？）" autocomplete="off">
+  <button id="send">发送</button>
+</footer>
+<script>
+  // 同一 session 只追加最新一条消息：历史由服务端 LangGraph checkpointer 自动拼接
+  const sessionId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+  const log = document.getElementById('log'), statusEl = document.getElementById('status');
+  const input = document.getElementById('input'), sendBtn = document.getElementById('send');
+
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function addMsg(role, text, sources) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+    div.innerHTML = esc(text);
+    if (sources && sources.length) {
+      const s = document.createElement('div');
+      s.className = 'sources';
+      s.innerHTML = sources.map(x => '<span>来源：' + esc(x) + '</span>').join('');
+      div.appendChild(s);
+    }
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+  function setBusy(b) {
+    sendBtn.disabled = b; statusEl.style.display = b ? 'block' : 'none';
+  }
+  async function ask(q) {
+    if (!q.trim() || sendBtn.disabled) return;
+    addMsg('user', q);
+    input.value = '';
+    setBusy(true);
+    try {
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: q }], session_id: sessionId }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      addMsg('bot', data.answer || '（空回答）', data.sources);
+    } catch (e) {
+      addMsg('bot', '出错了：' + e.message + '（检查服务端是否已配置 DEEPSEEK_API_KEY）', null);
+    } finally {
+      setBusy(false);
+      input.focus();
+    }
+  }
+  sendBtn.addEventListener('click', () => ask(input.value));
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') ask(input.value); });
+  document.querySelectorAll('#chips button').forEach(b =>
+    b.addEventListener('click', () => ask(b.dataset.q)));
+  input.focus();
+</script>
+</body>
+</html>
