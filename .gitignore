@@ -9,7 +9,8 @@ venv/
 # 环境与密钥
 .env
 .env.*
-!.env.example   # 模板文件需要进仓库（README 指引用户复制它生成 .env）
+# 模板文件需要进仓库（README 指引用户复制它生成 .env）
+!.env.example
 
 # 数据与索引（项目位于子目录 kbase-agent/，用 **/ 前缀匹配任意层级）
 **/data/chroma/
