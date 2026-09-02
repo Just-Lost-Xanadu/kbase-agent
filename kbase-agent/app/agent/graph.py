@@ -17,7 +17,12 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agent.state import AgentState
 from app.config import settings
-from app.guardrails import AgentLimits, truncate_tool_output
+from app.guardrails import (
+    AgentLimits,
+    default_recursion_limit,
+    is_duplicate_call,
+    truncate_tool_output,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -84,9 +89,9 @@ def _build_graph(llm, tools: list):
 
             if tool is None:
                 content = f"未找到工具：{name}"
-            elif history and history[-1] == key:
+            elif is_duplicate_call(history, key):
                 content = (
-                    f"检测到与上一步相同的重复工具调用（{name} {args}），"
+                    f"检测到重复工具调用（{name} {args}，历史中已执行过），"
                     "为避免死循环本次不再执行。请基于已有信息作答，或换个问法。"
                 )
             else:
@@ -132,7 +137,9 @@ class AgentRuntime:
     def _config(self, session_id: str | None) -> dict:
         return {
             "configurable": {"thread_id": session_id or uuid.uuid4().hex},
-            "recursion_limit": settings.max_recursion,
+            # 默认按 AgentLimits.max_steps 推导，避免与 prompt 承诺的步数不一致
+            "recursion_limit": settings.max_recursion
+            or default_recursion_limit(),
         }
 
     @staticmethod

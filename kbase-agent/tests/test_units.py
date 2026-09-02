@@ -1,6 +1,11 @@
 """纯逻辑单元测试：不依赖外部模型/网络，装好 base 依赖即可跑。"""
 
-from app.guardrails import truncate_tool_output
+from app.guardrails import (
+    AgentLimits,
+    default_recursion_limit,
+    is_duplicate_call,
+    truncate_tool_output,
+)
 from app.retrieval.chunker import fixed_size_chunk, split_documents
 from app.retrieval.hybrid import hybrid_search
 from app.retrieval.keyword import tokenize
@@ -60,3 +65,20 @@ def test_metrics_summarize_keys():
     assert summary["cases"] == 2
     assert summary["topk_hit_rate"] == 0.5
     assert summary["citation_accuracy"] == 0.5
+
+
+def test_is_duplicate_call_full_history():
+    # A→B→A 式的隔步重复也要判出（全历史判重，而非仅相邻）
+    history = [
+        ("retrieve_knowledge", '{"question": "a"}'),
+        ("query_business_db", '{"question": "b"}'),
+    ]
+    assert is_duplicate_call(history, ("retrieve_knowledge", '{"question": "a"}')) is True
+    assert is_duplicate_call(history, ("query_business_db", '{"question": "c"}')) is False
+    assert is_duplicate_call([], ("retrieve_knowledge", "{}")) is False
+
+
+def test_recursion_limit_derived_from_max_steps():
+    # recursion_limit 与 prompt 承诺的 max_steps 同源，避免框架提前掐断
+    assert default_recursion_limit() == AgentLimits.max_steps * 2 + 5
+    assert default_recursion_limit(25) == 55
