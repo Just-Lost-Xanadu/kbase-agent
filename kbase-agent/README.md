@@ -10,7 +10,8 @@ app/
   llm.py               # ChatOpenAI -> DeepSeek
   main.py              # FastAPI 入口（懒加载资源）
   services.py          # 检索管道 + Agent runtime 懒加载与进程内缓存
-  store.py             # 会话/消息记录（conversations/messages），读历史接口数据源
+  store.py             # 会话/消息记录 + run_traces 观测表（读历史/观测接口数据源）
+  observability.py     # 轻量 trace：节点耗时/token/成本（contextvars，不侵入 LangGraph state）
   api/
     schemas.py         # 请求/响应模型
     chat.py            # POST /chat（同步） + POST /chat/stream（SSE 流式）
@@ -32,8 +33,8 @@ app/
     docs/                # 知识库语料：6 篇 md + docx/xlsx/pdf 样例，统一分块入库（_ 前缀忽略）
     business/            # 业务系统个人数据（首次调用自动生成示例）
     checkpoints.sqlite   # 会话 checkpoint + 消息记录（自动生成；.gitignore 已忽略 *.db）
-eval/                  # 40 条评测集 + 指标（top-k 命中率 / 引用准确率）
-scripts/               # index_docs.py / eval.py / demo_agent.py
+eval/                  # 40 条评测集（检索层 eval.py / 端到端 eval_e2e.py）
+scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
 tests/                 # smoke + 纯逻辑单测
 ```
@@ -61,6 +62,7 @@ python scripts/index_docs.py                     # 建索引（首次会下载 ~
 python scripts/eval.py                           # 跑 40 条评测（命中率/引用准确率）
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
 python scripts/demo_office_parse.py      # 查看 docx/xlsx/pdf 解析文本（不写索引）
+python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判回答/引用/成本）
 ```
 
 网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖）。左侧会话栏可**新建 / 回看 / 切换历史会话**：消息与 checkpoint 落 `data/checkpoints.sqlite`，刷新页面甚至重启服务后仍能恢复并继续对话。
@@ -69,6 +71,7 @@ API：
 - `POST /api/chat`：同步返回 `{answer, sources}`。
 - `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案与来源。
 - `GET /api/sessions` / `GET /api/sessions/{session_id}/messages`：读会话列表与历史消息（给前端"历史会话"用）。
+- `GET /api/runs` / `GET /api/runs/{id}`：运行 trace（耗时/token/成本/错误 + 节点级 steps），可观测用。
 - 请求体：`{messages:[{role,content}], session_id?}`。**同一 session 请只追加最新一条消息**（LangGraph 按 thread 自动拼历史，避免重复）。
 - **会话持久化**：Agent checkpoint（AsyncSqliteSaver）与消息记录共用 `data/checkpoints.sqlite`（WAL），**服务重启可续聊、历史可读**。
 
@@ -82,9 +85,9 @@ API：
 
 ## 效果度量（简历口径）
 
-`eval/questions.jsonl` 每条含 `expected_source`，`scripts/eval.py` 输出：
-- `topk_hit_rate`：检索 top-k 是否命中正确来源（是"命中率"不是 recall，口径注意）。
-- `citation_accuracy`：返回来源是否覆盖真值来源。
+`eval/questions.jsonl` 每条含 `expected_source`：
+- `scripts/eval.py`（检索层，离线零成本）：`topk_hit_rate` 是否命中正确来源、`citation_accuracy`。
+- `scripts/eval_e2e.py`（端到端，真实调 Agent API）：统计回答率、引用覆盖（真值来源出现在回答/来源中）、耗时与成本——用于 prompt/模型/工具改动后的回归把关。
 
 40 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
 
@@ -119,7 +122,7 @@ flowchart TD
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
 - `MAX_RECURSION` + prompt 内 `max_iterations` + 重复调用检测 = 三道防死循环。
 - 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**替换已有同名文档后请删 `data/chroma/` 重建索引**（增量新增文件可直接 `python scripts/index_docs.py`）。
-- 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages 表）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户鉴权与消息分库。成本/trace 日志与端到端引用评测列为待补。
+- 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户鉴权与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。
 
 ## 常见坑
 

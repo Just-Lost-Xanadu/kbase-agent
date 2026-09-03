@@ -35,6 +35,22 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id);
 CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
+CREATE TABLE IF NOT EXISTS run_traces (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT,
+    question        TEXT,
+    answer          TEXT,
+    sources         TEXT,
+    steps           TEXT,
+    prompt_tokens   INTEGER DEFAULT 0,
+    completion_tokens INTEGER DEFAULT 0,
+    total_tokens    INTEGER DEFAULT 0,
+    cost_cny        REAL DEFAULT 0,
+    duration_ms     INTEGER DEFAULT 0,
+    error           TEXT,
+    started_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_run_traces_started ON run_traces(started_at);
 """
 
 
@@ -167,3 +183,100 @@ def has_schema(db_path: str) -> bool:
             conn.close()
     except sqlite3.Error:
         return False
+
+
+async def save_trace(
+    conversation_id: str | None,
+    recorder_summary: dict,
+    answer: str,
+    sources: list[str],
+) -> None:
+    """持久化一次 Agent 运行的 trace（观测用，与消息记录互不影响）。"""
+    db = await _conn()
+    try:
+        await db.execute(
+            """
+            INSERT INTO run_traces
+                (conversation_id, question, answer, sources, steps,
+                 prompt_tokens, completion_tokens, total_tokens,
+                 cost_cny, duration_ms, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                conversation_id,
+                recorder_summary.get("question", ""),
+                answer,
+                json.dumps(sources, ensure_ascii=False) if sources else None,
+                json.dumps(recorder_summary.get("steps", []), ensure_ascii=False),
+                recorder_summary.get("prompt_tokens", 0),
+                recorder_summary.get("completion_tokens", 0),
+                recorder_summary.get("total_tokens", 0),
+                recorder_summary.get("cost_cny", 0.0),
+                recorder_summary.get("duration_ms", 0),
+                (recorder_summary.get("error") or "")[:500] or None,
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def list_traces(limit: int = 50) -> list[dict]:
+    """按时间倒序列出 trace（不含 steps 明细，列表页用）。"""
+    db = await _conn()
+    try:
+        cur = await db.execute(
+            """
+            SELECT id, conversation_id, question, prompt_tokens, completion_tokens,
+                   total_tokens, cost_cny, duration_ms, error, started_at
+            FROM run_traces ORDER BY id DESC LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        await cur.close()
+    finally:
+        await db.close()
+    return [
+        {
+            "id": r[0],
+            "conversation_id": r[1],
+            "question": r[2],
+            "prompt_tokens": r[3] or 0,
+            "completion_tokens": r[4] or 0,
+            "total_tokens": r[5] or 0,
+            "cost_cny": round(r[6] or 0.0, 4),
+            "duration_ms": r[7] or 0,
+            "error": r[8],
+            "started_at": r[9],
+        }
+        for r in rows
+    ]
+
+
+async def get_trace(trace_id: int) -> dict | None:
+    """取单条 trace 完整信息（含 steps 明细，detail 页用）。"""
+    db = await _conn()
+    try:
+        cur = await db.execute(
+            "SELECT * FROM run_traces WHERE id = ?", (trace_id,)
+        )
+        row = await cur.fetchone()
+        await cur.close()
+    finally:
+        await db.close()
+    if row is None:
+        return None
+    cols = [
+        "id", "conversation_id", "question", "answer", "sources",
+        "steps", "prompt_tokens", "completion_tokens", "total_tokens",
+        "cost_cny", "duration_ms", "error", "started_at",
+    ]
+    data = dict(zip(cols, row))
+    data["cost_cny"] = round(data["cost_cny"] or 0.0, 4)
+    for key in ("sources", "steps"):
+        try:
+            data[key] = json.loads(data[key]) if data[key] else []
+        except (json.JSONDecodeError, TypeError):
+            data[key] = []
+    return data

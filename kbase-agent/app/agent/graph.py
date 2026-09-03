@@ -88,14 +88,52 @@ def _final_answer(messages: list) -> str:
     return ""
 
 
+def _usage_tokens(message) -> tuple[int, int]:
+    """从 LLM 返回消息里取 token 用量（兼容 usage_metadata / token_usage）。"""
+    usage = getattr(message, "usage_metadata", None)
+    if isinstance(usage, dict):
+        return int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0)
+    meta = getattr(message, "response_metadata", None) or {}
+    token_usage = (meta.get("token_usage") or {}) if isinstance(meta, dict) else {}
+    return int(token_usage.get("prompt_tokens") or 0), int(token_usage.get("completion_tokens") or 0)
+
+
 def _build_graph(llm, tools: list, checkpointer):
     tools_by_name = {tool.name: tool for tool in tools}
 
     async def agent_node(state: AgentState) -> dict:
-        response = await llm.ainvoke(state["messages"])
+        from app.observability import Recorder, Step, get_recorder, now_ms, estimate_cost
+
+        rec: Recorder | None = get_recorder()
+        t0 = now_ms()
+        try:
+            response = await llm.ainvoke(state["messages"])
+            ok, note = True, ""
+        except Exception as exc:  # noqa: BLE001
+            response = None
+            ok, note = False, f"{type(exc).__name__}: {exc}"
+        if rec is not None:
+            if response is not None:
+                p, c = _usage_tokens(response)
+            else:
+                p = c = 0
+            rec.add(
+                Step(
+                    node="agent", name="llm", duration_ms=now_ms() - t0,
+                    prompt_tokens=p, completion_tokens=c,
+                    cost_cny=estimate_cost(p, c), ok=ok, note=note[:200],
+                )
+            )
+            if not ok:
+                rec.error = note
+        if response is None:
+            raise RuntimeError(f"LLM 调用失败: {note}")
         return {"messages": [response]}
 
     async def tools_node(state: AgentState) -> dict:
+        from app.observability import Recorder, Step, get_recorder, now_ms
+
+        rec: Recorder | None = get_recorder()
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None) or []
         new_messages: list = []
@@ -106,6 +144,7 @@ def _build_graph(llm, tools: list, checkpointer):
             args = call.get("args") or {}
             key = (name, json.dumps(args, ensure_ascii=False, sort_keys=True))
             tool = tools_by_name.get(name)
+            t0 = now_ms()
 
             if tool is None:
                 content = f"未找到工具：{name}"
@@ -131,6 +170,22 @@ def _build_graph(llm, tools: list, checkpointer):
                 ToolMessage(content=content, tool_call_id=call.get("id", ""), name=name)
             )
             history.append(key)
+
+            if rec is not None:
+                note = ""
+                ok = True
+                if tool is None:
+                    ok = False
+                    note = "工具不存在"
+                elif content.startswith("检测到重复工具调用"):
+                    note = "重复调用，已跳过"
+                elif "超时" in content or "调用失败" in content:
+                    ok = False
+                    note = content[:160]
+                rec.add(
+                    Step(node="tools", name=name, duration_ms=now_ms() - t0,
+                         ok=ok, note=note)
+                )
 
         return {"messages": new_messages, "tool_call_history": history}
 

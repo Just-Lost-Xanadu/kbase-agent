@@ -21,6 +21,10 @@ class Settings:
     api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.0"))
 
+    # 成本核算（元/百万 token，仅用于 trace 估算，可按实际套餐改）
+    llm_input_price: float = float(os.getenv("LLM_PRICE_INPUT", "2.0"))
+    llm_output_price: float = float(os.getenv("LLM_PRICE_OUTPUT", "8.0"))
+
     # embedding：默认 fastembed（ONNX，免 torch）；flagembedding 才用 bge-m3（需 .[embed]）
     embed_backend: str = os.getenv("EMBED_BACKEND", "fastembed")
     fastembed_model: str = os.getenv("FASTEMBED_MODEL", "BAAI/bge-small-zh-v1.5")
