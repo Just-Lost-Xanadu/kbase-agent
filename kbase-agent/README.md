@@ -10,6 +10,7 @@ app/
   llm.py               # ChatOpenAI -> DeepSeek
   main.py              # FastAPI 入口（懒加载资源）
   services.py          # 检索管道 + Agent runtime 懒加载与进程内缓存
+  store.py             # 会话/消息记录（conversations/messages），读历史接口数据源
   api/
     schemas.py         # 请求/响应模型
     chat.py            # POST /chat（同步） + POST /chat/stream（SSE 流式）
@@ -23,13 +24,14 @@ app/
     pipeline.py        # 装配入口：index / retrieve / 懒加载
   agent/
     state.py           # AgentState（messages 用 Annotated reducer）
-    graph.py           # LangGraph StateGraph + MemorySaver + 护栏 + MCP 接线
+    graph.py           # LangGraph StateGraph + SqliteSaver(checkpoint) + 护栏 + MCP 接线
   mcp/
     servers.py         # FastMCP：retrieve_knowledge / query_business_db（HR 个人数据）
   guardrails.py        # 轮次/超时/工具输出截断/重复调用检测
   data/
     docs/                # 知识库原始文档（6 篇示例：手册/产品FAQ/交付售后/IT/人事/薪酬绩效）
     business/            # 业务系统个人数据（首次调用自动生成示例）
+    checkpoints.sqlite   # 会话 checkpoint + 消息记录（自动生成；.gitignore 已忽略 *.db）
 eval/                  # 40 条评测集 + 指标（top-k 命中率 / 引用准确率）
 scripts/               # index_docs.py / eval.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
@@ -57,10 +59,12 @@ python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍
 
 网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖；同一页面会维持一个 session，支持多轮上下文）。
 
-API 两个端点（服务首次收到对话请求会自动建索引并拉起 MCP 子进程）：
+API：
 - `POST /api/chat`：同步返回 `{answer, sources}`。
 - `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案与来源。
+- `GET /api/sessions` / `GET /api/sessions/{session_id}/messages`：读会话列表与历史消息（给前端"历史会话"用）。
 - 请求体：`{messages:[{role,content}], session_id?}`。**同一 session 请只追加最新一条消息**（LangGraph 按 thread 自动拼历史，避免重复）。
+- **会话持久化**：Agent checkpoint（AsyncSqliteSaver）与消息记录共用 `data/checkpoints.sqlite`（WAL），**服务重启可续聊、历史可读**。
 
 示例对话：问"我今年还剩几天年假？按手册能结转吗？"——Agent 会先 `retrieve_knowledge` 拿《员工手册》结转规则，再 `query_business_db` 拿张三个人剩余天数，两条来源结合作答，末尾列引用。
 
@@ -96,7 +100,7 @@ flowchart TD
 
 ## 面试可讲点
 
-- **框架**：LangGraph 有状态图、MemorySaver 断点续聊（生产换 Sqlite/Postgres）；AutoGen 并入 Microsoft Agent Framework 后我以 LangGraph 为主线。
+- **框架**：LangGraph 有状态图、SQLite 断点续聊（AsyncSqliteSaver + WAL，重启不丢会话；高并发生产可换 Postgres）；AutoGen 并入 Microsoft Agent Framework 后我以 LangGraph 为主线。
 - **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。
 - **RAG**：混合检索（向量 + BM25 做 RRF）去抖 + 可选重排 + 引用溯源 + 评测集验证，坏例能说清怎么调好的。
 - **工程化**：SSE 流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
@@ -108,7 +112,7 @@ flowchart TD
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
 - `MAX_RECURSION` + prompt 内 `max_iterations` + 重复调用检测 = 三道防死循环。
-- 会话状态存 `MemorySaver`（进程内）：服务重启即清空、同一线程内可续聊；生产换 Sqlite/Postgres checkpoint，并加按用户鉴权。成本/trace 日志与端到端引用评测列为待补。
+- 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages 表）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户鉴权与消息分库。成本/trace 日志与端到端引用评测列为待补。
 
 ## 常见坑
 

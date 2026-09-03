@@ -2,7 +2,8 @@
 
 图结构：agent(调模型决策) -> tools(执行工具/护栏) -> agent ... -> 直接作答。
 护栏：recursion_limit + 单步超时 + 工具输出截断 + 重复调用检测（均在 tools 节点）。
-状态持久化：MemorySaver（进程内断点可续聊；生产换 SqliteSaver/Postgres 即可）。
+状态持久化：AsyncSqliteSaver（SQLite WAL，checkpoint 落盘，服务重启可续聊）；
+生产并发更高时可换 PostgresSaver，表结构同 LangGraph checkpoint 约定。
 """
 
 import asyncio
@@ -11,8 +12,9 @@ import sys
 import uuid
 from pathlib import Path
 
+import aiosqlite
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.state import AgentState
@@ -86,7 +88,7 @@ def _final_answer(messages: list) -> str:
     return ""
 
 
-def _build_graph(llm, tools: list):
+def _build_graph(llm, tools: list, checkpointer):
     tools_by_name = {tool.name: tool for tool in tools}
 
     async def agent_node(state: AgentState) -> dict:
@@ -142,15 +144,17 @@ def _build_graph(llm, tools: list):
         {"tools": "tools", END: END},
     )
     graph.add_edge("tools", "agent")
-    return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer)
 
 
 class AgentRuntime:
     """持有编译好的图与 MCP 工具。会话标识 thread_id，崩溃后同 session 可续聊。"""
 
-    def __init__(self, graph, tools: list):
+    def __init__(self, graph, tools: list, saver: AsyncSqliteSaver | None = None, conn=None):
         self.graph = graph
         self.tools = tools
+        self._saver = saver
+        self._conn = conn
 
     def _config(self, session_id: str | None) -> dict:
         return {
@@ -215,8 +219,29 @@ class AgentRuntime:
         }
 
     async def aclose(self) -> None:
-        # adapters 每个工具调用自己开/关 stdio 会话，无需常驻清理
-        return None
+        # adapters 每个工具调用自己开/关 stdio 会话，无需常驻清理；
+        # 这里关掉 SQLite checkpoint 连接
+        if self._conn is not None:
+            try:
+                await self._conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._conn = None
+
+
+async def _open_checkpointer() -> tuple[AsyncSqliteSaver, aiosqlite.Connection]:
+    """打开（必要时创建）SQLite checkpoint 库并启用 WAL。
+
+    WAL：读写不互锁，配合 uvicorn 单写者足够；路径见 CHECKPOINT_DB（默认 ./data/checkpoints.sqlite）。
+    """
+    db_path = Path(settings.checkpoint_db).resolve()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = await aiosqlite.connect(str(db_path))
+    await conn.execute("PRAGMA journal_mode=WAL")
+    await conn.execute("PRAGMA busy_timeout=5000")
+    saver = AsyncSqliteSaver(conn)
+    await saver.setup()
+    return saver, conn
 
 
 async def create_runtime() -> AgentRuntime:
@@ -225,6 +250,7 @@ async def create_runtime() -> AgentRuntime:
 
     from app.llm import make_llm
 
+    saver, conn = await _open_checkpointer()
     client = MultiServerMCPClient(
         {
             "kbase": {
@@ -235,10 +261,14 @@ async def create_runtime() -> AgentRuntime:
             }
         }
     )
-    tools = await client.get_tools()
+    try:
+        tools = await client.get_tools()
+    except Exception:
+        await conn.close()
+        raise
     llm = make_llm(temperature=settings.temperature).bind_tools(tools)
-    graph = _build_graph(llm, tools)
-    return AgentRuntime(graph=graph, tools=tools)
+    graph = _build_graph(llm, tools, checkpointer=saver)
+    return AgentRuntime(graph=graph, tools=tools, saver=saver, conn=conn)
 
 
 async def run_single_question(question: str, session_id: str | None = None) -> dict:

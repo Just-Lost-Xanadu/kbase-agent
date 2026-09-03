@@ -12,7 +12,10 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 资源全部懒加载（见 app/services.py），这里只负责退出清理
+    # 建会话记录表（与 checkpoint 共用 data/checkpoints.sqlite）；Agent 资源仍懒加载
+    from app import store
+
+    await store.init_db()
     yield
     runtime = getattr(app.state, "runtime", None)
     if runtime is not None:

@@ -5,6 +5,8 @@ description = "企业知识库 + 工具调用 Agent（LangGraph + MCP + RAG）�
 requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.2.60",
+    "langgraph-checkpoint-sqlite>=3.0",
+    "aiosqlite>=0.20",
     "langchain-openai>=0.2.0",
     "langchain-core>=0.3",
     "mcp[cli]>=1.2.0",

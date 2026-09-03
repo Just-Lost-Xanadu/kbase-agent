@@ -17,6 +17,7 @@ venv/
 **/data/raw/
 **/data/business/
 *.db
+*.sqlite
 
 # IDE
 .idea/

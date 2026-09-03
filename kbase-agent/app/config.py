@@ -34,6 +34,9 @@ class Settings:
     chroma_path: str = os.getenv("CHROMA_PATH", "./data/chroma")
     collection_name: str = os.getenv("COLLECTION_NAME", "kbase")
 
+    # Agent checkpoint 持久化（SQLite + WAL，重启不丢会话）
+    checkpoint_db: str = os.getenv("CHECKPOINT_DB", "./data/checkpoints.sqlite")
+
     # Agent 护栏：recursion_limit 可选覆盖；不设则用默认值
     # （app.guardrails.default_recursion_limit()，由 max_steps 推导 = 2×max_steps+5）。
     # 这样 prompt 承诺的 max_steps 步工具调用不会被框架提前掐断。

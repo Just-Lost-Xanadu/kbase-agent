@@ -9,6 +9,25 @@ from app.services import ensure_services
 router = APIRouter()
 
 
+async def _record_turn(req: ChatRequest, answer: str, sources: list[str]) -> None:
+    """把一轮对话写入会话记录表（仅显式带 session_id 的请求；供读历史接口用）。"""
+    if not req.session_id:
+        return
+    from app import store
+
+    last_user = next(
+        (m.content for m in reversed(req.messages) if m.role in {"user", "human"}),
+        "",
+    )
+    await store.save_turn(
+        req.session_id,
+        title=(last_user or "新会话")[:40],
+        user_content=last_user,
+        answer=answer,
+        sources=sources,
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, request: Request) -> ChatResponse:
     try:
@@ -23,6 +42,10 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Agent 执行失败：{exc}") from exc
+    try:
+        await _record_turn(req, result["answer"], result["sources"])
+    except Exception:  # noqa: BLE001
+        pass  # 记录失败不影响主流程回答
     return ChatResponse(answer=result["answer"], sources=result["sources"])
 
 
@@ -40,6 +63,10 @@ async def chat_stream(req: ChatRequest, request: Request):
                 [m.model_dump() for m in req.messages], session_id=req.session_id
             ):
                 if "answer" in update:  # 收尾事件
+                    try:
+                        await _record_turn(req, update["answer"], update.get("sources", []))
+                    except Exception:  # noqa: BLE001
+                        pass
                     yield {"event": "done", "data": json.dumps(update, ensure_ascii=False)}
                     continue
                 for node, payload in update.items():
@@ -69,3 +96,19 @@ async def chat_stream(req: ChatRequest, request: Request):
 @router.get("/health", tags=["ops"])
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/sessions", tags=["history"])
+async def list_sessions(limit: int = 50) -> list[dict]:
+    """会话列表（倒序），供前端"历史会话"侧栏。"""
+    from app import store
+
+    return await store.list_sessions(limit=max(1, min(limit, 200)))
+
+
+@router.get("/sessions/{session_id}/messages", tags=["history"])
+async def get_session_messages(session_id: str) -> list[dict]:
+    """某会话的全部消息历史（含来源引用），供前端渲染。"""
+    from app import store
+
+    return await store.get_messages(session_id)
