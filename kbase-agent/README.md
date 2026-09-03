@@ -29,7 +29,7 @@ app/
     servers.py         # FastMCP：retrieve_knowledge / query_business_db（HR 个人数据）
   guardrails.py        # 轮次/超时/工具输出截断/重复调用检测
   data/
-    docs/                # 知识库原始文档（6 篇示例：手册/产品FAQ/交付售后/IT/人事/薪酬绩效）
+    docs/                # 知识库语料：6 篇 md + docx/xlsx/pdf 样例，统一分块入库（_ 前缀忽略）
     business/            # 业务系统个人数据（首次调用自动生成示例）
     checkpoints.sqlite   # 会话 checkpoint + 消息记录（自动生成；.gitignore 已忽略 *.db）
 eval/                  # 40 条评测集 + 指标（top-k 命中率 / 引用准确率）
@@ -55,6 +55,7 @@ uvicorn app.main:app --reload   # http://127.0.0.1:8000/docs
 python scripts/index_docs.py                     # 建索引（首次会下载 ~几十MB ONNX embedding）
 python scripts/eval.py                           # 跑 40 条评测（命中率/引用准确率）
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
+python scripts/demo_office_parse.py      # 查看 docx/xlsx/pdf 解析文本（不写索引）
 ```
 
 网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖）。左侧会话栏可**新建 / 回看 / 切换历史会话**：消息与 checkpoint 落 `data/checkpoints.sqlite`，刷新页面甚至重启服务后仍能恢复并继续对话。

@@ -37,4 +37,4 @@
 {"id": 37, "question": "绩效考核怎么评？分几档？", "gold_answer": "季度绩效，S/A/B/C/D 五档，主管初评加部门校准", "expected_source": "薪酬与绩效制度_示例.md"}
 {"id": 38, "question": "连续两季度绩效得 C 会怎样？", "gold_answer": "进入绩效改进计划（PIP）2 个月后复评", "expected_source": "薪酬与绩效制度_示例.md"}
 {"id": 39, "question": "年终奖怎么算？年底前离职还有吗？", "gold_answer": "基数×绩效系数×在职月数/12，发放日前离职不享受", "expected_source": "薪酬与绩效制度_示例.md"}
-{"id": 40, "question": "一年调几次薪？什么时候调？", "gold_answer": "年度调薪窗口每年 3 月，依据上一年绩效", "expected_source": "薪酬与绩效制度_示例.md"}
+{"id": 40, "question": "公司年度调薪一般在什么时候？一年能调几次？", "gold_answer": "年度调薪窗口每年 3 月，一年一次；晋升调薪除外", "expected_source": "薪酬与绩效制度_示例.md"}
