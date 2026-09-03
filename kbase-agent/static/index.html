@@ -3,17 +3,41 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-store">
 <title>kbase-agent · 企业知识库 + 工具调用 Agent</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-    background: #0f1419; color: #e6e6e6; height: 100vh; display: flex; flex-direction: column;
+    background: #0f1419; color: #e6e6e6; height: 100vh; display: flex;
   }
-  header { padding: 14px 20px; border-bottom: 1px solid #262d36; background: #151b23; }
+  #sidebar {
+    width: 264px; flex-shrink: 0; background: #151b23; border-right: 1px solid #262d36;
+    display: flex; flex-direction: column;
+  }
+  #sidebar .brand { padding: 14px 16px 10px; font-size: 14px; font-weight: 600; border-bottom: 1px solid #262d36; }
+  #sidebar .brand small { display: block; font-weight: 400; color: #8b98a5; font-size: 11px; margin-top: 2px; }
+  #newChat {
+    margin: 12px; padding: 8px 0; background: #2563eb; color: #fff; border: none; border-radius: 8px;
+    font-size: 13px; cursor: pointer;
+  }
+  #newChat:hover { background: #1d4ed8; }
+  #sessionList { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+  .session-item {
+    width: 100%; text-align: left; background: transparent; color: #cbd5e1; border: none; border-radius: 8px;
+    padding: 10px 12px; cursor: pointer; margin-bottom: 2px;
+  }
+  .session-item:hover { background: #1c242e; }
+  .session-item.active { background: #1d4ed8; color: #fff; }
+  .session-item .t { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-item .m { font-size: 11px; color: #8b98a5; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-item.active .m { color: #dbeafe; }
+  .session-item .meta { display: flex; justify-content: space-between; margin-top: 2px; font-size: 10px; color: #64748b; }
+  #chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header { padding: 14px 20px; border-bottom: 1px solid #262d36; background: #151b23; display: flex; align-items: baseline; gap: 12px; }
   header h1 { font-size: 16px; font-weight: 600; }
-  header p { font-size: 12px; color: #8b98a5; margin-top: 2px; }
+  header p { font-size: 12px; color: #8b98a5; }
   #log { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
   .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
   .user { align-self: flex-end; background: #1d4ed8; border-bottom-right-radius: 4px; }
@@ -32,34 +56,52 @@
   #send { background: #2563eb; color: #fff; border: none; border-radius: 10px; padding: 0 22px; cursor: pointer; font-size: 14px; }
   #send:disabled { opacity: .5; cursor: not-allowed; }
   .err { color: #f87171; }
+  #emptyTip { text-align: center; color: #55636f; margin-top: 40px; font-size: 13px; line-height: 2; }
+  @media (max-width: 720px) { #sidebar { display: none; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>kbase-agent 演示</h1>
-  <p>LangGraph 有状态 Agent · MCP 工具接入 · 混合检索 RAG · DeepSeek</p>
-</header>
-<div id="log"></div>
-<div id="status">Agent 思考中…（可能需要多步工具调用）</div>
-<div id="chips">
-  <button data-q="我今年还剩几天年假？按手册规则能结转吗？">年假 & 结转规则</button>
-  <button data-q="张三还剩几天年假？结合制度规则回答">查张三个人数据</button>
-  <button data-q="出差住宿报销上限是多少？">报销标准</button>
-</div>
-<footer>
-  <input id="input" placeholder="输入问题，Enter 发送（如：我今年还剩几天年假？）" autocomplete="off">
-  <button id="send">发送</button>
-</footer>
+<aside id="sidebar">
+  <div class="brand">kbase-agent<small>会话记录存 data/checkpoints.sqlite，重启可续聊</small></div>
+  <button id="newChat">＋ 新对话</button>
+  <div id="sessionList"></div>
+</aside>
+
+<section id="chat">
+  <header>
+    <h1>kbase-agent 演示</h1>
+    <p id="sessionLabel">新会话</p>
+  </header>
+  <div id="log"><div id="emptyTip">问点什么吧，例如：<br>张三还剩几天年假？按手册能结转吗？</div></div>
+  <div id="status">Agent 思考中…（可能需要多步工具调用）</div>
+  <div id="chips">
+    <button data-q="张三还剩几天年假？结合制度规则回答">查张三个人数据</button>
+    <button data-q="出差住宿报销上限是多少？">报销标准</button>
+    <button data-q="每月什么时候发工资？">发薪规则</button>
+  </div>
+  <footer>
+    <input id="input" placeholder="输入问题，Enter 发送（同会话历史由服务端自动续接）" autocomplete="off">
+    <button id="send">发送</button>
+  </footer>
+</section>
+
 <script>
-  // 同一 session 只追加最新一条消息：历史由服务端 LangGraph checkpointer 自动拼接
-  const sessionId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+  // —— 会话标识：localStorage 记住当前会话，刷新后回看并可续聊 ——
+  const LS_KEY = 'kbase_session_id';
+  const genId = () => (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+  let sessionId = localStorage.getItem(LS_KEY) || genId();
+
   const log = document.getElementById('log'), statusEl = document.getElementById('status');
   const input = document.getElementById('input'), sendBtn = document.getElementById('send');
+  const listEl = document.getElementById('sessionList'), newBtn = document.getElementById('newChat');
+  const labelEl = document.getElementById('sessionLabel');
 
   function esc(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
   function addMsg(role, text, sources) {
+    const tip = document.getElementById('emptyTip');
+    if (tip) tip.remove();
     const div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
     div.innerHTML = esc(text);
@@ -76,31 +118,112 @@
   function setBusy(b) {
     sendBtn.disabled = b; statusEl.style.display = b ? 'block' : 'none';
   }
+  async function api(path, opts) {
+    const resp = await fetch(path, opts);
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || ('HTTP ' + resp.status));
+    return resp.json();
+  }
+  function fmtTime(s) {
+    const d = new Date(s.replace(' ', 'T'));
+    const p = n => String(n).padStart(2, '0');
+    return (d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  function shortLabel(t) { return t.length > 20 ? t.slice(0, 20) + '…' : t; }
+
+  // —— 会话列表 ——
+  async function refreshSessions() {
+    let list = [];
+    try { list = await api('/api/sessions'); } catch (e) { return; }
+    listEl.innerHTML = '';
+    for (const s of list) {
+      const b = document.createElement('button');
+      b.dataset.sid = s.id;
+      b.className = 'session-item' + (s.id === sessionId ? ' active' : '');
+      b.innerHTML = '<div class="t">' + esc(s.title || '（未命名）') + '</div>' +
+                    '<div class="m">' + esc(s.last_preview || '') + '</div>' +
+                    '<div class="meta"><span>' + s.message_count + ' 条</span><span>' + fmtTime(s.updated_at) + '</span></div>';
+      b.addEventListener('click', () => openSession(s.id));
+      listEl.appendChild(b);
+    }
+  }
+
+  // —— 切换 / 回看会话 ——
+  async function openSession(id, renderHistory = true) {
+    sessionId = id;
+    localStorage.setItem(LS_KEY, id);
+    labelEl.textContent = '历史会话';
+    if (renderHistory) await loadHistory(id);  // loadHistory 内部会刷新列表
+  }
+  async function loadHistory(id) {
+    let msgs = [];
+    try { msgs = await api('/api/sessions/' + encodeURIComponent(id) + '/messages'); } catch (e) { msgs = []; }
+    const tip = document.getElementById('emptyTip');
+    if (tip) tip.remove();
+    log.innerHTML = '';
+    if (!msgs.length) {
+      const d = document.createElement('div');
+      d.id = 'emptyTip'; d.innerHTML = '问点什么吧，例如：<br>张三还剩几天年假？按手册能结转吗？';
+      log.appendChild(d);
+      labelEl.textContent = '新会话';
+    } else {
+      const first = msgs.find(m => m.role === 'user');
+      labelEl.textContent = first ? shortLabel(first.content) : '历史会话';
+    }
+    for (const m of msgs) addMsg(m.role === 'user' ? 'user' : 'bot', m.content, m.sources || []);
+    refreshSessions();
+  }
+
+  // —— 新对话 ——
+  function newConversation() {
+    sessionId = genId();
+    localStorage.setItem(LS_KEY, sessionId);
+    log.innerHTML = '';
+    const d = document.createElement('div');
+    d.id = 'emptyTip'; d.innerHTML = '问点什么吧，例如：<br>张三还剩几天年假？按手册能结转吗？';
+    log.appendChild(d);
+    labelEl.textContent = '新会话';
+    [...listEl.querySelectorAll('.session-item.active')].forEach(el => el.classList.remove('active'));
+    refreshSessions();
+    input.focus();
+  }
+
+  // —— 发送（同一 session 只发最新一条，历史由服务端 checkpoint 拼） ——
   async function ask(q) {
     if (!q.trim() || sendBtn.disabled) return;
     addMsg('user', q);
     input.value = '';
     setBusy(true);
     try {
-      const resp = await fetch('/api/chat', {
+      const data = await api('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [{ role: 'user', content: q }], session_id: sessionId }),
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+      localStorage.setItem(LS_KEY, sessionId);  // 已产生真实会话，落盘以便刷新回看
       addMsg('bot', data.answer || '（空回答）', data.sources);
+      labelEl.textContent = shortLabel(q);
     } catch (e) {
       addMsg('bot', '出错了：' + e.message + '（检查服务端是否已配置 DEEPSEEK_API_KEY）', null);
     } finally {
       setBusy(false);
+      refreshSessions();
       input.focus();
     }
   }
+
+  newBtn.addEventListener('click', newConversation);
   sendBtn.addEventListener('click', () => ask(input.value));
   input.addEventListener('keydown', e => { if (e.key === 'Enter') ask(input.value); });
   document.querySelectorAll('#chips button').forEach(b =>
     b.addEventListener('click', () => ask(b.dataset.q)));
+
+  // 初次加载：若本地记住过会话则回看，否则开新会话
+  if (localStorage.getItem(LS_KEY)) {
+    loadHistory(sessionId);
+  } else {
+    refreshSessions();
+  }
   input.focus();
 </script>
 </body>

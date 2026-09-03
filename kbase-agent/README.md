@@ -57,7 +57,7 @@ python scripts/eval.py                           # 跑 40 条评测（命中率/
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
 ```
 
-网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖；同一页面会维持一个 session，支持多轮上下文）。
+网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖）。左侧会话栏可**新建 / 回看 / 切换历史会话**：消息与 checkpoint 落 `data/checkpoints.sqlite`，刷新页面甚至重启服务后仍能恢复并继续对话。
 
 API：
 - `POST /api/chat`：同步返回 `{answer, sources}`。
