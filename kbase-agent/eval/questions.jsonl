@@ -33,3 +33,8 @@
 {"id": 33, "question": "转正申请要提前多久提交？公司怎么评审？", "gold_answer": "提前 7 个工作日申请，主管面谈加 360 度评分", "expected_source": "入职转正与离职制度_示例.md"}
 {"id": 34, "question": "劳动合同最晚多久签？社保从什么时候开始交？", "gold_answer": "入职 1 个月内签，社保公积金自入职当月缴纳", "expected_source": "入职转正与离职制度_示例.md"}
 {"id": 35, "question": "哪些人离职后要受竞业限制？一般限制多久？", "gold_answer": "核心岗位，限制期一般不超过 2 年", "expected_source": "入职转正与离职制度_示例.md"}
+{"id": 36, "question": "每月什么时候发工资？遇到节假日怎么办？", "gold_answer": "每月 10 日发上月工资，遇节假日提前发放", "expected_source": "薪酬与绩效制度_示例.md"}
+{"id": 37, "question": "绩效考核怎么评？分几档？", "gold_answer": "季度绩效，S/A/B/C/D 五档，主管初评加部门校准", "expected_source": "薪酬与绩效制度_示例.md"}
+{"id": 38, "question": "连续两季度绩效得 C 会怎样？", "gold_answer": "进入绩效改进计划（PIP）2 个月后复评", "expected_source": "薪酬与绩效制度_示例.md"}
+{"id": 39, "question": "年终奖怎么算？年底前离职还有吗？", "gold_answer": "基数×绩效系数×在职月数/12，发放日前离职不享受", "expected_source": "薪酬与绩效制度_示例.md"}
+{"id": 40, "question": "一年调几次薪？什么时候调？", "gold_answer": "年度调薪窗口每年 3 月，依据上一年绩效", "expected_source": "薪酬与绩效制度_示例.md"}
