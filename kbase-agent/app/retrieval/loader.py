@@ -15,6 +15,8 @@ def load_documents(source_dir: str | Path) -> list[dict]:
     for path in sorted(root.iterdir()):
         if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTS:
             continue
+        if path.name.startswith("_"):
+            continue
         content = path.read_text(encoding="utf-8").strip()
         if content:
             documents.append({"content": content, "source": path.name})

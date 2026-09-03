@@ -27,10 +27,10 @@ app/
   mcp/
     servers.py         # FastMCP：retrieve_knowledge / query_business_db（HR 个人数据）
   guardrails.py        # 轮次/超时/工具输出截断/重复调用检测
-data/
-  docs/                # 知识库原始文档（员工手册 / 产品 FAQ）
-  business/            # 业务系统个人数据（首次调用自动生成示例）
-eval/                  # 10 条评测集 + 指标（top-k 命中率 / 引用准确率）
+  data/
+    docs/                # 知识库原始文档（5 篇示例：员工手册/产品FAQ/交付售后/IT/人事）
+    business/            # 业务系统个人数据（首次调用自动生成示例）
+eval/                  # 35 条评测集 + 指标（top-k 命中率 / 引用准确率）
 scripts/               # index_docs.py / eval.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
 tests/                 # smoke + 纯逻辑单测
@@ -51,7 +51,7 @@ uvicorn app.main:app --reload   # http://127.0.0.1:8000/docs
 
 ```bash
 python scripts/index_docs.py                     # 建索引（首次会下载 ~几十MB ONNX embedding）
-python scripts/eval.py                           # 跑 10 条评测（命中率/引用准确率）
+python scripts/eval.py                           # 跑 35 条评测（命中率/引用准确率）
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
 ```
 
@@ -70,7 +70,7 @@ API 两个端点（服务首次收到对话请求会自动建索引并拉起 MCP
 - `topk_hit_rate`：检索 top-k 是否命中正确来源（是"命中率"不是 recall，口径注意）。
 - `citation_accuracy`：返回来源是否覆盖真值来源。
 
-10 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
+35 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
 
 ## Agent 决策流程
 

@@ -8,3 +8,28 @@
 {"id": 8, "question": "客户数据加密在传输和存储两个环节分别怎么做？", "gold_answer": "TLS 传输加密与 AES 存储加密的说明", "expected_source": "产品FAQ_示例.md"}
 {"id": 9, "question": "试用版到期后数据会保留多久？", "gold_answer": "试用到期后数据保留时限与导出窗口", "expected_source": "产品FAQ_示例.md"}
 {"id": 10, "question": "员工在客户现场违规拍照被投诉，按制度怎么处理？", "gold_answer": "保密与廉洁条款对应的处理与后果", "expected_source": "员工手册_示例.md"}
+{"id": 11, "question": "离职时还没休完的年假，公司会给补偿吗？", "gold_answer": "离职未休年假按日工资折算补偿", "expected_source": "员工手册_示例.md"}
+{"id": 12, "question": "法定节假日加班怎么算？是几倍调休？", "gold_answer": "节假日加班按 2 倍调休计入调休池", "expected_source": "员工手册_示例.md"}
+{"id": 13, "question": "我在上海出差，一晚住宿花了 480 元，能全额报销吗？", "gold_answer": "上海属一线城市，每晚限额 500 元内可全额报销", "expected_source": "员工手册_示例.md"}
+{"id": 14, "question": "报销发票的抬头有要求吗？", "gold_answer": "发票抬头须为公司全称", "expected_source": "员工手册_示例.md"}
+{"id": 15, "question": "请病假要提前多久提交什么材料？", "gold_answer": "返岗后 2 个工作日内补交医院证明，突发可先报备", "expected_source": "员工手册_示例.md"}
+{"id": 16, "question": "合作方送我一盒茶叶，能收吗？", "gold_answer": "严禁收受合作方礼品礼金，按廉洁条款处理", "expected_source": "员工手册_示例.md"}
+{"id": 17, "question": "李四今年只剩 1 天年假，他离职时这笔假能折成钱吗？", "gold_answer": "离职未休年假按日工资折算补偿", "expected_source": "员工手册_示例.md"}
+{"id": 18, "question": "王五加班攒的调休一直没休，会过期吗？", "gold_answer": "调休 3 个月内用完，逾期清零", "expected_source": "员工手册_示例.md"}
+{"id": 19, "question": "生产高可用版最少要几台服务器？", "gold_answer": "至少 3 台节点：2 应用 + 1 数据库，应用节点 8 核 16G", "expected_source": "产品FAQ_示例.md"}
+{"id": 20, "question": "试用到期后数据还能导出来吗？格式是？", "gold_answer": "30 天内可导出为 JSON/CSV", "expected_source": "产品FAQ_示例.md"}
+{"id": 21, "question": "你们系统会记录我的请求内容到日志吗？", "gold_answer": "日志不记录明文请求体", "expected_source": "产品FAQ_示例.md"}
+{"id": 22, "question": "管理员可以限制只有公司内网 IP 才能登录系统吗？", "gold_answer": "可设置 IP 白名单与登录二次验证，支持 RBAC", "expected_source": "产品FAQ_示例.md"}
+{"id": 23, "question": "接口平时限多少 QPS？遇到突发流量能不能冲到更高？", "gold_answer": "默认 QPS 50，突发可到 100", "expected_source": "产品FAQ_示例.md"}
+{"id": 24, "question": "下单后一般多久能部署上线？交付流程包括哪些？", "gold_answer": "标准实施 4~6 周，含部署、数据迁移、对接、培训", "expected_source": "产品交付与售后FAQ_示例.md"}
+{"id": 25, "question": "半夜系统挂了多久会有人处理？", "gold_answer": "7×24 监控，严重故障 1 小时内响应", "expected_source": "产品交付与售后FAQ_示例.md"}
+{"id": 26, "question": "大版本升级前会通知我吗？", "gold_answer": "提前 14 天书面通知并出具兼容性评估报告", "expected_source": "产品交付与售后FAQ_示例.md"}
+{"id": 27, "question": "买之前想先试试，有免费试用环境吗？", "gold_answer": "提供 30 天免费 POC 环境，支持导入样例数据", "expected_source": "产品交付与售后FAQ_示例.md"}
+{"id": 28, "question": "有同事离职了，他的账号什么时候停用？", "gold_answer": "离职当日回收冻结账号，满 30 天彻底注销", "expected_source": "IT与账号管理制度_示例.md"}
+{"id": 29, "question": "公司要求密码多久换一次？复杂度有要求吗？", "gold_answer": "至少 12 位混合字符，每 90 天更换", "expected_source": "IT与账号管理制度_示例.md"}
+{"id": 30, "question": "能把自己做的客户报表发到个人邮箱带回家继续做吗？", "gold_answer": "禁止个人邮箱/网盘传输敏感数据，须走加密通道", "expected_source": "IT与账号管理制度_示例.md"}
+{"id": 31, "question": "离职时公司发的电脑要还回去吗？", "gold_answer": "须交还全部设备并配合清除本地数据", "expected_source": "IT与账号管理制度_示例.md"}
+{"id": 32, "question": "还在试用期想走人，要提前几天提离职？", "gold_answer": "试用期离职提前 3 天书面提出", "expected_source": "入职转正与离职制度_示例.md"}
+{"id": 33, "question": "转正申请要提前多久提交？公司怎么评审？", "gold_answer": "提前 7 个工作日申请，主管面谈加 360 度评分", "expected_source": "入职转正与离职制度_示例.md"}
+{"id": 34, "question": "劳动合同最晚多久签？社保从什么时候开始交？", "gold_answer": "入职 1 个月内签，社保公积金自入职当月缴纳", "expected_source": "入职转正与离职制度_示例.md"}
+{"id": 35, "question": "哪些人离职后要受竞业限制？一般限制多久？", "gold_answer": "核心岗位，限制期一般不超过 2 年", "expected_source": "入职转正与离职制度_示例.md"}
