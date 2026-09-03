@@ -40,6 +40,11 @@ tests/                 # smoke + 纯逻辑单测
 
 ## 快速开始
 
+**一键启动（推荐）**：进入 `kbase-agent` 目录，双击 `start.bat`（Windows），或运行 `./start.ps1`。
+脚本会自动完成：检查/创建 `.venv` → 缺依赖时安装 → 生成 `.env`（仍占位则提示你填 key）→ 缺索引时自动建库 → 启动服务并打开 http://127.0.0.1:8000。`Ctrl+C` 停止。
+
+手动步骤（等价，想看清每步时用）：
+
 ```bash
 cd kbase-agent
 python -m venv .venv
