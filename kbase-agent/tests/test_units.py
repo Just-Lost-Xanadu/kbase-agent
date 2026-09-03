@@ -67,6 +67,23 @@ def test_metrics_summarize_keys():
     assert summary["citation_accuracy"] == 0.5
 
 
+def test_parse_sources_from_content_blocks():
+    # MCP adapters 把工具输出包成 [{'type':'text','text':...}]，此前 sources 恒为空
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    from app.agent.graph import _parse_sources
+
+    messages = [
+        ToolMessage(
+            content=[{"type": "text", "text": "【来源：员工手册_示例.md】\n规则正文"}],
+            tool_call_id="t1",
+            name="retrieve_knowledge",
+        ),
+        AIMessage(content="回答正文"),
+    ]
+    assert _parse_sources(messages) == ["员工手册_示例.md"]
+
+
 def test_is_duplicate_call_full_history():
     # A→B→A 式的隔步重复也要判出（全历史判重，而非仅相邻）
     history = [

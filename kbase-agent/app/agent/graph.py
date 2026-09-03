@@ -43,12 +43,30 @@ def _route(state: AgentState) -> str:
     return "tools" if has_tool_calls else END
 
 
+def _text_of(content) -> str:
+    """把 LangChain 消息内容规整成纯文本。
+
+    MCP 工具经 langchain-mcp-adapters 返回的是 content block 列表
+    （[{'type': 'text', 'text': ...}]），直接 str() 会得到 Python repr，
+    导致【来源：】标记匹配不到、模型上下文也被 repr 污染。
+    """
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text", "")))
+            else:
+                parts.append(str(block))
+        return "\n".join(part for part in parts if part)
+    return "" if content is None else str(content)
+
+
 def _parse_sources(messages: list) -> list[str]:
     sources: list[str] = []
     for message in messages:
         if getattr(message, "type", "") != "tool":
             continue
-        for line in str(message.content).splitlines():
+        for line in _text_of(message.content).splitlines():
             line = line.strip()
             if line.startswith("【来源：") and "】" in line:
                 source = line.split("】", 1)[0][len("【来源：") :]
@@ -100,7 +118,7 @@ def _build_graph(llm, tools: list):
                         tool.ainvoke(args), timeout=AgentLimits.step_timeout_seconds
                     )
                     content = truncate_tool_output(
-                        str(raw), AgentLimits.max_tool_output_chars
+                        _text_of(raw), AgentLimits.max_tool_output_chars
                     )
                 except asyncio.TimeoutError:
                     content = f"工具 {name} 调用超时（>{AgentLimits.step_timeout_seconds}s）"
