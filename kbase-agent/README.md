@@ -15,7 +15,7 @@ app/
     schemas.py         # 请求/响应模型
     chat.py            # POST /chat（同步） + POST /chat/stream（SSE 流式）
   retrieval/
-    loader.py          # 文档解析（data/docs）
+    loader.py          # 文档解析 md/txt/docx/xlsx/pdf（文本层抽取，_ 前缀忽略）
     chunker.py         # fixed vs recursive 切分
     embedder.py        # 默认 FastEmbed(ONNX 免 torch)，可切 bge-m3
     vector_store.py    # Chroma（开发；生产可换 Milvus/ES）
@@ -112,6 +112,7 @@ flowchart TD
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
 - `MAX_RECURSION` + prompt 内 `max_iterations` + 重复调用检测 = 三道防死循环。
+- 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**替换已有同名文档后请删 `data/chroma/` 重建索引**（增量新增文件可直接 `python scripts/index_docs.py`）。
 - 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages 表）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户鉴权与消息分库。成本/trace 日志与端到端引用评测列为待补。
 
 ## 常见坑
