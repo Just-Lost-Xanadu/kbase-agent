@@ -1,6 +1,6 @@
 # kbase-agent
 
-**企业知识库 + 工具调用 Agent**：基于 LangGraph 构建有状态 Agent，RAG 检索与业务工具经 **MCP 协议真接入**（`langchain-mcp-adapters` + stdio），支持流式输出、会话持久化与护栏。求职学习项目的旗舰作品。
+**企业知识库 + 工具调用 Agent**：基于 LangGraph 构建有状态 Agent，RAG 检索与业务工具经 **MCP 协议真接入**（`langchain-mcp-adapters` + stdio），支持流式输出、多轮会话与护栏。求职学习项目的旗舰作品。
 
 ## 目录结构
 
@@ -28,9 +28,9 @@ app/
     servers.py         # FastMCP：retrieve_knowledge / query_business_db（HR 个人数据）
   guardrails.py        # 轮次/超时/工具输出截断/重复调用检测
   data/
-    docs/                # 知识库原始文档（5 篇示例：员工手册/产品FAQ/交付售后/IT/人事）
+    docs/                # 知识库原始文档（6 篇示例：手册/产品FAQ/交付售后/IT/人事/薪酬绩效）
     business/            # 业务系统个人数据（首次调用自动生成示例）
-eval/                  # 35 条评测集 + 指标（top-k 命中率 / 引用准确率）
+eval/                  # 40 条评测集 + 指标（top-k 命中率 / 引用准确率）
 scripts/               # index_docs.py / eval.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
 tests/                 # smoke + 纯逻辑单测
@@ -51,7 +51,7 @@ uvicorn app.main:app --reload   # http://127.0.0.1:8000/docs
 
 ```bash
 python scripts/index_docs.py                     # 建索引（首次会下载 ~几十MB ONNX embedding）
-python scripts/eval.py                           # 跑 35 条评测（命中率/引用准确率）
+python scripts/eval.py                           # 跑 40 条评测（命中率/引用准确率）
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
 ```
 
@@ -64,13 +64,19 @@ API 两个端点（服务首次收到对话请求会自动建索引并拉起 MCP
 
 示例对话：问"我今年还剩几天年假？按手册能结转吗？"——Agent 会先 `retrieve_knowledge` 拿《员工手册》结转规则，再 `query_business_db` 拿张三个人剩余天数，两条来源结合作答，末尾列引用。
 
+## 演示截图
+
+网页对话（多轮、含引用来源）：
+
+![网页对话示例](docs/screenshots/web-chat.png)
+
 ## 效果度量（简历口径）
 
 `eval/questions.jsonl` 每条含 `expected_source`，`scripts/eval.py` 输出：
 - `topk_hit_rate`：检索 top-k 是否命中正确来源（是"命中率"不是 recall，口径注意）。
 - `citation_accuracy`：返回来源是否覆盖真值来源。
 
-35 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
+40 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
 
 ## Agent 决策流程
 
@@ -93,7 +99,7 @@ flowchart TD
 - **框架**：LangGraph 有状态图、MemorySaver 断点续聊（生产换 Sqlite/Postgres）；AutoGen 并入 Microsoft Agent Framework 后我以 LangGraph 为主线。
 - **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。
 - **RAG**：混合检索（向量 + BM25 做 RRF）去抖 + 可选重排 + 引用溯源 + 评测集验证，坏例能说清怎么调好的。
-- **工程化**：SSE 流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载、成本与 trace。
+- **工程化**：SSE 流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
 
 ## 已知取舍 / 改进方向
 
@@ -102,6 +108,7 @@ flowchart TD
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
 - `MAX_RECURSION` + prompt 内 `max_iterations` + 重复调用检测 = 三道防死循环。
+- 会话状态存 `MemorySaver`（进程内）：服务重启即清空、同一线程内可续聊；生产换 Sqlite/Postgres checkpoint，并加按用户鉴权。成本/trace 日志与端到端引用评测列为待补。
 
 ## 常见坑
 
