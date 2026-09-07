@@ -239,33 +239,41 @@ class AgentRuntime:
 
     async def _build_input(
         self, messages: list[dict], session_id: str | None
-    ) -> tuple[list, dict]:
+    ) -> tuple[list, dict, int]:
         """构造本轮图输入：SystemMessage 只在 thread 为空时注入一次。
 
         带 checkpointer 时同一 thread 的历史消息由 LangGraph 自动拼接，
         若每轮都重新注入 SystemMessage 会导致系统提示词重复且顺序错乱。
         注意 API 契约：同一 session 每次只追加最新一条用户消息。
+
+        返回 (lc_messages, config, prior_count)：
+        prior_count = 本轮运行前 checkpoint 里已有的消息条数 —— 收尾时用它做偏移，
+        使 sources 只统计"本轮新增消息"里的工具来源，避免把历史轮次的来源累计进来
+        （多轮后 state["messages"] 是完整历史，若不偏移，每轮答案都会挂上前几轮检索过的所有来源）。
         """
         config = self._config(session_id)
         snapshot = await self.graph.aget_state(config)
-        existing = bool((snapshot.values or {}).get("messages"))
+        prior_messages = (snapshot.values or {}).get("messages") or []
+        existing = bool(prior_messages)
         lc_messages = self._to_lc_messages(messages)
         if not existing:
             lc_messages = [SystemMessage(content=SYSTEM_PROMPT)] + lc_messages
-        return lc_messages, config
+        return lc_messages, config, len(prior_messages)
 
     async def ainvoke(self, messages: list[dict], session_id: str | None = None) -> dict:
-        lc_messages, config = await self._build_input(messages, session_id)
+        lc_messages, config, prior = await self._build_input(messages, session_id)
         state = await self.graph.ainvoke({"messages": lc_messages}, config=config)
         final_messages = state["messages"]
+        # 只从本轮新增的消息里解析来源（历史轮次来源不累计）
+        fresh = final_messages[prior:]
         return {
             "answer": _final_answer(final_messages),
-            "sources": _parse_sources(final_messages),
+            "sources": _parse_sources(fresh),
         }
 
     async def astream(self, messages: list[dict], session_id: str | None = None):
         """按 super-step 产出 (node, state_update) 增量，供 SSE 逐步下发。"""
-        lc_messages, config = await self._build_input(messages, session_id)
+        lc_messages, config, prior = await self._build_input(messages, session_id)
         async for update in self.graph.astream(
             {"messages": lc_messages}, config=config, stream_mode="updates"
         ):
@@ -274,9 +282,10 @@ class AgentRuntime:
         snapshot = await self.graph.aget_state(config)
         values = snapshot.values or {}
         final_messages = values.get("messages", [])
+        fresh = final_messages[prior:]
         yield {
             "answer": _final_answer(final_messages),
-            "sources": _parse_sources(final_messages),
+            "sources": _parse_sources(fresh),
         }
 
     async def aclose(self) -> None:
