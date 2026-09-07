@@ -32,9 +32,10 @@ def truncate_tool_output(text: str, limit: int = 4000) -> str:
 def is_duplicate_call(
     call_history: list[tuple[str, str]], key: tuple[str, str]
 ) -> bool:
-    """全历史判重：同工具、同参数只要在历史中出现过即视为重复。
+    """对给定调用历史判重：同工具、同参数在历史中出现过即视为重复。
 
-    相邻判重漏掉 A→B→A 式的隔步打转；按整个 history 判重才能兜住
-    "原地打转"类死循环。工具调用都是幂等查询，跳过重复执行不会丢信息。
+    调用方（graph.tools_node）传入的是"最近 max_steps 次"的滑动窗口：
+    窗口内能兜住 A→B→A 式隔步打转，窗口外（更早轮次的相同提问）允许重跑，
+    避免跨轮次的合法重复查询被误拦。工具调用都是幂等查询，跳过不丢信息。
     """
     return key in call_history

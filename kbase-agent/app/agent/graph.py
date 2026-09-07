@@ -137,7 +137,10 @@ def _build_graph(llm, tools: list, checkpointer):
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None) or []
         new_messages: list = []
-        history = list(state.get("tool_call_history", []))
+        # 判重窗口 = max_steps：单次运行最多 max_steps 次工具调用，窗口内即可覆盖
+        # 本轮 A→B→A 式原地打转；窗口外的旧调用（如之前轮次的相同提问）允许重跑，
+        # 避免"隔几轮再问同一个问题"被全历史判重误拦。
+        history = list(state.get("tool_call_history", []))[-AgentLimits.max_steps :]
 
         for call in calls:
             name = call.get("name", "")
@@ -150,7 +153,7 @@ def _build_graph(llm, tools: list, checkpointer):
                 content = f"未找到工具：{name}"
             elif is_duplicate_call(history, key):
                 content = (
-                    f"检测到重复工具调用（{name} {args}，历史中已执行过），"
+                    f"检测到重复工具调用（{name} {args}，本轮已执行过），"
                     "为避免死循环本次不再执行。请基于已有信息作答，或换个问法。"
                 )
             else:
@@ -187,7 +190,10 @@ def _build_graph(llm, tools: list, checkpointer):
                          ok=ok, note=note)
                 )
 
-        return {"messages": new_messages, "tool_call_history": history}
+        return {
+            "messages": new_messages,
+            "tool_call_history": history[-AgentLimits.max_steps :],
+        }
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", agent_node)

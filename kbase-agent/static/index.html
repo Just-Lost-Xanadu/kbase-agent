@@ -188,24 +188,95 @@
     input.focus();
   }
 
-  // —— 发送（同一 session 只发最新一条，历史由服务端 checkpoint 拼） ——
+  // —— 发送：走 /api/chat/stream（SSE 流式），本会话只发最新一条 ——
   async function ask(q) {
     if (!q.trim() || sendBtn.disabled) return;
     addMsg('user', q);
     input.value = '';
     setBusy(true);
+    // 占位 bot(空)，收到 done 后以服务端最终 answer 填充
+    const placeholder = addMsg('bot', '', null);
+    const decoder = new TextDecoder();
+    let finalAnswer = '';
+    let finalSources = [];
+    let sseError = null;
+    let stepPreviewEl = null;
+    const makePreview = () => {
+      if (!stepPreviewEl) {
+        stepPreviewEl = document.createElement('div');
+        stepPreviewEl.className = 'msg bot'; stepPreviewEl.style.color = '#93a4b3';
+        log.appendChild(stepPreviewEl);
+      }
+      return stepPreviewEl;
+    };
+    const clearPreview = () => { if (stepPreviewEl) { stepPreviewEl.remove(); stepPreviewEl = null; } };
+    const onEvent = (eventName, dataStr) => {
+      if (eventName === 'message') {
+        try {
+          const e = JSON.parse(dataStr);
+          if (e && e.type === 'step') {
+            if (e.node === 'agent' && e.text) makePreview().textContent = '… ' + e.text;
+            else if (e.node === 'tools' && Array.isArray(e.tool_calls) && e.tool_calls.length)
+              makePreview().textContent = '工具调用中：' + e.tool_calls.map(t => t.name || '').join(', ');
+            else if (e.node === 'tools') makePreview().textContent = '工具调用完成…';
+          } else if (e && e.type === 'error') {
+            throw new Error(e.message || 'Agent 错误');
+          }
+        } catch (err) { console.warn('SSE 本地解析', err.message); }
+      } else if (eventName === 'done') {
+        try { const d = JSON.parse(dataStr); finalAnswer = d.answer || ''; finalSources = d.sources || []; } catch (e) {}
+      } else if (eventName === 'error') {
+        try { const d = JSON.parse(dataStr); sseError = (d && d.message) || 'Agent 输出错误'; } catch (e) { sseError = 'Agent 输出错误'; }
+      }
+    };
+    // 需在后续 done 里真正抛错提示，sseError 仅在无 finalAnswer 且无真实 answer 时兜底
+    const throwIfNoAnswer = () => { if (sseError && !finalAnswer) throw new Error(sseError); };
     try {
-      const data = await api('/api/chat', {
+      const resp = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [{ role: 'user', content: q }], session_id: sessionId }),
       });
-      localStorage.setItem(LS_KEY, sessionId);  // 已产生真实会话，落盘以便刷新回看
-      addMsg('bot', data.answer || '（空回答）', data.sources);
+      if (!resp.ok) throw new Error(((await resp.json().catch(() => ({}))).detail) || ('HTTP ' + resp.status));
+      if (!resp.body) throw new Error('服务端未返回流（无 body）');
+      const reader = resp.body.getReader();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        while (true) {
+          const nl = buf.indexOf('\n\n');
+          if (nl < 0) break;
+          const evt = buf.slice(0, nl); buf = buf.slice(nl + 2);
+          let evtName = 'message', dataLines = [];
+          for (const line of evt.split('\n')) {
+            if (line.startsWith('event:')) evtName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+          }
+          if (dataLines.length) onEvent(evtName, dataLines.join('\n'));
+        }
+      }
+      throwIfNoAnswer();
+      if (finalAnswer) {
+        localStorage.setItem(LS_KEY, sessionId);
+        placeholder.className = 'msg bot';
+        placeholder.textContent = finalAnswer;
+        if (finalSources && finalSources.length) {
+          const s = document.createElement('div');
+          s.className = 'sources';
+          s.innerHTML = finalSources.map(x => '<span>来源：' + esc(x) + '</span>').join('');
+          placeholder.appendChild(s);
+        }
+      } else {
+        placeholder.textContent = '（空回答）';
+      }
       labelEl.textContent = shortLabel(q);
     } catch (e) {
-      addMsg('bot', '出错了：' + e.message + '（检查服务端是否已配置 DEEPSEEK_API_KEY）', null);
+      placeholder.textContent = '出错了：' + e.message + '（检查服务端是否已配置 DEEPSEEK_API_KEY）';
     } finally {
+      clearPreview();
+      if (placeholder.textContent === '' && placeholder.childNodes.length === 0) placeholder.remove();
       setBusy(false);
       refreshSessions();
       input.focus();

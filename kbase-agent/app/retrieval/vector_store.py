@@ -37,7 +37,11 @@ class VectorStore:
             return 0
 
     def add(self, chunks: list[dict]) -> None:
-        """把分块连同 metadata（source / chunk_id / method）写入向量库。"""
+        """把分块连同 metadata（source / chunk_id / method）写入向量库。
+
+        用 upsert（按 chunk_id 幂等覆盖）：重复建索引 / 增量新增不会因
+        id 冲突报错（Chroma add 对已存在 id 会抛错）。
+        """
         self._ensure_collection()
         ids = [c["chunk_id"] for c in chunks]
         documents = [c["content"] for c in chunks]
@@ -46,7 +50,7 @@ class VectorStore:
             {"source": c["source"], "chunk_id": c["chunk_id"], "method": c["method"]}
             for c in chunks
         ]
-        self._collection.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
+        self._collection.upsert(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
 
     def search(self, query: str, top_k: int = 5) -> list[dict]:
         """query -> dense 检索，返回 [{'content','source','chunk_id','distance'}]。"""

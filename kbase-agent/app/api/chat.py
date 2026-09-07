@@ -111,7 +111,9 @@ async def chat_stream(req: ChatRequest, request: Request):
                     messages = payload.get("messages") or []
                     if messages:
                         last = messages[-1]
-                        if getattr(last, "content", None):
+                        # 只把 agent 节点文本上行；tools 节点的 ToolMessage 原文
+                        # 含工具输出，可能很大或含内部信息，不下发给前端
+                        if node == "agent" and getattr(last, "content", None):
                             event["text"] = str(last.content)[:500]
                         if getattr(last, "tool_calls", None):
                             event["tool_calls"] = [

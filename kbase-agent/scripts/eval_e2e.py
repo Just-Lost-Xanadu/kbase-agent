@@ -164,7 +164,9 @@ async def _run_case(runtime, question: str, expected_source: str) -> dict:
 
     answer = result["answer"] or ""
     sources = result["sources"] or []
-    cited = any(expected_source in s for s in sources) or (expected_source in answer)
+    # 口径说明：引用覆盖 = 真值来源文件名必须出现在工具返回的 sources 列表里（精确命中）。
+    # 模型在回答正文里复述文件名不算有效引用——避免"看过就复述"被误判为覆盖，评测口径收紧。
+    cited = any(expected_source in s for s in sources)
     return {
         "id": 0,
         "answer_nonempty": bool(answer.strip()),
