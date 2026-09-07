@@ -11,13 +11,15 @@ import json
 import sys
 import uuid
 from pathlib import Path
+from typing import Annotated, TypedDict
 
 import aiosqlite
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
 
-from app.agent.state import AgentState
 from app.config import settings
 from app.guardrails import (
     AgentLimits,
@@ -27,6 +29,41 @@ from app.guardrails import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# ---- 图状态 AgentState（原 app/agent/state.py，并入本文件：状态定义就近其消费方）----
+
+
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    # 引用来源不放进图状态：最终答案的 sources 由 ainvoke/astream 收尾时
+    # 从消息流解析（见 _parse_sources），避免图里维护冗余字段。
+    # 工具调用去重历史：仅保留最近 max_steps 次（窗口在 tools_node 维护），
+    # 覆盖"本轮 A→B→A 原地打转"，同时放行跨轮次的重复提问。
+    tool_call_history: list[tuple[str, str]]
+
+
+# ---- LLM 工厂（原 app/llm.py，并入本文件：唯一消费者就是本模块的 create_runtime）----
+
+
+def make_llm(temperature: float = 0.0) -> ChatOpenAI:
+    """构造 OpenAI 兼容的 LLM 客户端（默认指向 DeepSeek）。
+
+    未配置 key（缺失或仍是占位符 sk-your-key）时抛明确中文报错，避免带占位 key 悄悄调失败。
+    .env 需位于当前工作目录（从项目根启动 uvicorn/脚本），由 app.config 的 load_dotenv 读取。
+    """
+    if not settings.api_key or settings.api_key == "sk-your-key":
+        raise ValueError(
+            "未配置有效的 DEEPSEEK_API_KEY。请在项目根目录创建 .env"
+            "（复制 .env.example 并填入真实 key，占位符 sk-your-key 不会被接受），"
+            "或先执行：$env:DEEPSEEK_API_KEY='sk-真实key'。"
+            "注意 .env 需位于当前工作目录（从项目根启动 uvicorn/脚本）。"
+        )
+    return ChatOpenAI(
+        model=settings.model_name,
+        base_url=settings.base_url,
+        api_key=settings.api_key,
+        temperature=temperature,
+    )
 
 SYSTEM_PROMPT = (
     "你是企业内部知识助手 Agent。回答用户问题时遵守：\n"
@@ -325,8 +362,6 @@ async def create_runtime() -> AgentRuntime:
     （内部 get_tools 抛错也会先关掉已开 sqlite 连接再 raise，避免泄漏 —— 见下方 try/except。）
     """
     from langchain_mcp_adapters.client import MultiServerMCPClient
-
-    from app.llm import make_llm
 
     saver, conn = await _open_checkpointer()
     client = MultiServerMCPClient(

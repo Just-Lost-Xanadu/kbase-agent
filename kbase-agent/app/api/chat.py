@@ -1,12 +1,28 @@
 import json
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.schemas import ChatRequest, ChatResponse
 from app.services import ensure_services
 
 router = APIRouter()
+
+
+# ---- 请求/响应模型（原 app/api/schemas.py，并入本文件：仅 /chat 系列接口使用）----
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(description="历史消息 + 最新用户输入")
+    session_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[str] = Field(default_factory=list, description="引用来源")
 
 
 async def _record_turn(req: ChatRequest, answer: str, sources: list[str]) -> None:

@@ -7,14 +7,12 @@
 ```
 app/
   config.py            # 环境配置（DeepSeek 主，OpenAI 兼容层模型无关）
-  llm.py               # ChatOpenAI -> DeepSeek
   main.py              # FastAPI 入口（懒加载资源）
   services.py          # 检索管道 + Agent runtime 懒加载与进程内缓存
   store.py             # 会话/消息记录 + run_traces 观测表（读历史/观测接口数据源）
   observability.py     # 轻量 trace：节点耗时/token/成本（contextvars，不侵入 LangGraph state）
   api/
-    schemas.py         # 请求/响应模型
-    chat.py            # POST /chat（同步） + POST /chat/stream（SSE 流式）
+    chat.py            # 请求/响应模型(内联) + POST /chat（同步）+ POST /chat/stream（SSE 流式）
   retrieval/
     loader.py          # 文档解析 md/txt/docx/xlsx/pdf（文本层抽取，_ 前缀忽略）
     chunker.py         # fixed vs recursive 切分
@@ -24,8 +22,7 @@ app/
     hybrid.py          # 向量 + BM25 走 RRF 合并 + 可选 rerank
     pipeline.py        # 装配入口：index / retrieve / 懒加载
   agent/
-    state.py           # AgentState（messages 用 Annotated reducer）
-    graph.py           # LangGraph StateGraph + SqliteSaver(checkpoint) + 护栏 + MCP 接线
+    graph.py           # AgentState(内联) + LangGraph StateGraph + LLM 工厂(make_llm) + SqliteSaver(checkpoint) + 护栏 + MCP 接线
   mcp/
     servers.py         # FastMCP：retrieve_knowledge / query_business_db（HR 个人数据）
   guardrails.py        # 轮次/超时/工具输出截断/重复调用检测
