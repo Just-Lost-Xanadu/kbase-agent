@@ -58,7 +58,6 @@ uvicorn app.main:app --reload   # http://127.0.0.1:8000/docs
 python scripts/index_docs.py                     # 建索引（首次会下载 ~几十MB ONNX embedding）
 python scripts/eval.py                           # 跑 40 条评测（命中率/引用准确率）
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
-python scripts/demo_office_parse.py      # 查看 docx/xlsx/pdf 解析文本（不写索引）
 python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判回答/引用/成本）
 ```
 
