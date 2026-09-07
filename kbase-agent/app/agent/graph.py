@@ -306,7 +306,15 @@ async def _open_checkpointer() -> tuple[AsyncSqliteSaver, aiosqlite.Connection]:
 
 
 async def create_runtime() -> AgentRuntime:
-    """声明 MCP 服务器并枚举工具（adapters 会为每个工具调用自开 stdio 会话），再编译图。"""
+    """工厂：声明 MCP 服务器与工具、建图，返回一个封装好生命周期(resource)的 AgentRuntime。
+
+    OOP/设计要点：真正"需要对象封装"的是这里的**运行时生命周期**——checkpointer 的
+    AsyncSqliteSaver、sqlite 连接 conn、graph、tools 都需要在请求结束后正确关闭
+    (aclose/close)，不能靠模块级散落。所以返回 AgentRuntime(封装 graph+tools+saver+conn)
+    并约定由调用方负责用毕 aclose()：这是"用对象管理成对分配/释放资源(open/close)"的典型场景，
+    普通函数无法靠返回值表达"记得关连接"的约束。
+    （内部 get_tools 抛错也会先关掉已开 sqlite 连接再 raise，避免泄漏 —— 见下方 try/except。）
+    """
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
     from app.llm import make_llm
@@ -314,6 +322,9 @@ async def create_runtime() -> AgentRuntime:
     saver, conn = await _open_checkpointer()
     client = MultiServerMCPClient(
         {
+            # 一个 MCP server("kbase"，由 app.mcp.servers 承载)里放两把工具：
+            # retrieve_knowledge(查知识库) 与 query_business_db(查业务数据)。
+            # 都是真 MCP stdio 子进程接入，LangGraph bind_tools 后由模型按需调用。
             "kbase": {
                 "command": sys.executable,
                 "args": ["-m", "app.mcp.servers"],

@@ -7,7 +7,16 @@ from app.retrieval.embedder import Embedder
 
 
 class VectorStore:
-    """Chroma 持久化向量库（开发用；生产可切 Milvus / ES，README 已注明换 collection 层即可）。"""
+    """Chroma 持久化向量库（开发用；生产可切 Milvus / ES，README 已注明换 collection 层即可）。
+
+    它封装了"对 embedding 结果的存取"，对外只暴露 count/search/add 三个动作——上层的
+    RetrievalPipeline 不关心底层是 Chroma 还是别的库，切后端对上层透明（"持久化存储"被隔离成
+    一个可替换的组件，而不是散落在各函数里，这是把它做成类而非模块函数的核心理由）。
+
+    懒加载设计：_client/_collection 延迟到首次访问才初始化（chromadb.PersistentClient 会启动
+    本地系统），避免 import 阶段就拉起 Chroma——冷启动只在真正需要向量库时才发生。
+    embedder 由 __init__ 注入（依赖注入），便于单测时换一个假 embedder。
+    """
 
     def __init__(self, embedder: Embedder):
         self.embedder = embedder

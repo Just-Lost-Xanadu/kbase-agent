@@ -1,8 +1,16 @@
 """轻量可观测：记录每次 Agent 运行的节点级 trace 与 token/成本估算。
 
-原理：不侵入 LangGraph state，用 contextvars 在当前请求任务内挂一个 Recorder，
-graph 的 agent/tools 节点只做只读采集（get_recorder()），调用方（API / 脚本）
-在结束后读取并持久化。并发请求各自任务上下文隔离，互不串扰。
+原理：不侵入 LangGraph state，用 contextvars 在当前请求任务内挂一个 Recorder（隐式上下文，
+无需把 recorder 作为参数一路透传到每个 graph 节点），graph 的 agent/tools 节点只做只读采集
+（get_recorder()），调用方（API / 脚本）在结束后读取并持久化。并发请求各自任务上下文隔离，
+互不串扰（这正是 contextvars 相对"模块级全局变量"的核心价值）。
+
+数据落点：Recorder.summarize() 产出 dict，由 API 层存到 store 的 run_traces 表，并暴露
+GET /api/runs 查询——回答"调试 Agent 时怎么观察某次跑了哪些节点/花了多少 token/成本"。
+
+成本口径：cost 是"估算值"——由 estimate_cost() 按 settings 里每百万 token 单价（env:
+LLM_INPUT_PRICE/LLM_OUTPUT_PRICE）乘 token 数算得，非真实账单。面试时口径说"单价来自配置、
+估算而非计费回执"更稳。
 """
 
 import contextvars
@@ -18,13 +26,19 @@ _current: contextvars.ContextVar["Recorder | None"] = contextvars.ContextVar(
 
 @dataclass
 class Step:
-    node: str            # agent / tools
-    name: str = ""       # llm 或工具名
+    """一次节点/工具级的观测单元。
+
+    node: "agent"(一次 LLM 调用) 或 "tools"(一次工具调用)。
+    该 dataclass 仅是"记录单元"：无自身行为逻辑、只作为数据携带，故用 @dataclass 而非完整类
+    最合适（Python 里"纯数据传输"用 dataclass，有方法逻辑的才是需要设计对象的类）。
+    """
+    node: str            # agent(LLM) / tools(工具)
+    name: str = ""       # llm 或具体工具名
     duration_ms: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    cost_cny: float = 0.0
-    ok: bool = True
+    prompt_tokens: int = 0          # 该次输入 token
+    completion_tokens: int = 0      # 该次输出 token
+    cost_cny: float = 0.0           # 该次估算成本（由 estimate_cost 折算）
+    ok: bool = True                 # 是否成功（异常节点置 False）
     note: str = ""
 
 
