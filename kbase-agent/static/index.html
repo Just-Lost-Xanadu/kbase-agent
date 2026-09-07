@@ -244,7 +244,9 @@
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buf += decoder.decode(value, { stream: true });
+        // 关键：EventSource/HTTP 的事件分隔是 CRLF(\r\n\r\n)。统一丢掉 \r，
+        // 否则 buf.indexOf('\n\n') 永远匹配不到，事件一个都解析不出 -> 永远拿不到 done.answer -> "空回答"。
+        buf += decoder.decode(value, { stream: true }).replace(/\r/g, '');
         while (true) {
           const nl = buf.indexOf('\n\n');
           if (nl < 0) break;
