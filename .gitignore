@@ -18,6 +18,11 @@ venv/
 **/data/business/
 *.db
 *.sqlite
+# SQLite WAL 运行期临时文件（服务运行/测试时产生，绝不能入库）
+*.sqlite-wal
+*.sqlite-shm
+*-wal
+*-shm
 
 # IDE
 .idea/

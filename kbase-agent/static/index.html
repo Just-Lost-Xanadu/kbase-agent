@@ -241,24 +241,38 @@
       if (!resp.body) throw new Error('服务端未返回流（无 body）');
       const reader = resp.body.getReader();
       let buf = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // 关键：EventSource/HTTP 的事件分隔是 CRLF(\r\n\r\n)。统一丢掉 \r，
-        // 否则 buf.indexOf('\n\n') 永远匹配不到，事件一个都解析不出 -> 永远拿不到 done.answer -> "空回答"。
-        buf += decoder.decode(value, { stream: true }).replace(/\r/g, '');
+      let eventTotal = 0;
+      // 把一段原始事件文本(可能含 event:/data: 若干行，也可能只有 data:)解析成一次事件回调。
+      const submitEventText = (raw) => {
+        let evtName = 'message', dataLines = [];
+        for (const line of raw.split('\n')) {
+          if (/^\s*$/.test(line)) continue;                 // 跳过纯空行
+          if (line.startsWith('event:')) evtName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+        }
+        if (dataLines.length) { onEvent(evtName, dataLines.join('\n')); eventTotal++; }
+      };
+      // 流进行中：按 "\n\n" 空行切出一个个完整事件处理（事件之间以空行分隔）。
+      const consumeBuffer = () => {
         while (true) {
           const nl = buf.indexOf('\n\n');
           if (nl < 0) break;
           const evt = buf.slice(0, nl); buf = buf.slice(nl + 2);
-          let evtName = 'message', dataLines = [];
-          for (const line of evt.split('\n')) {
-            if (line.startsWith('event:')) evtName = line.slice(6).trim();
-            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
-          }
-          if (dataLines.length) onEvent(evtName, dataLines.join('\n'));
+          submitEventText(evt);
         }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        // EventSource/HTTP 事件分隔是 CRLF(\r\n\r\n) —— 统一丢 \r，否则按 '\n\n' 永远切不出事件；
+        buf += decoder.decode(value, { stream: true }).replace(/\r/g, '');
+        consumeBuffer();
       }
+      // reader 已结束：若 buf 还剩"以 \n\n 分隔但最后一个事件没等到空行(连接结尾)"的残留，
+      // 把它直接当作最后一个完整事件提交，避免 done 恰结尾没空行而永远解析不到。
+      consumeBuffer();           // 再试一次(把流内能切的全切掉)
+      if (buf.trim()) submitEventText(buf);  // 无空行的尾事件兜底
+      buf = '';
       throwIfNoAnswer();
       if (finalAnswer) {
         localStorage.setItem(LS_KEY, sessionId);
@@ -271,6 +285,9 @@
           placeholder.appendChild(s);
         }
       } else {
+        // 真没拿到 done.answer 时的诊断：让 F12 一眼看收到几个事件/是否有 error，方便定位
+        console.warn('[kbase] SSE 结束但未收到 done.answer',
+          { eventTotal, bufTail: buf.slice(-120), sseError });
         placeholder.textContent = '（空回答）';
       }
       labelEl.textContent = shortLabel(q);
