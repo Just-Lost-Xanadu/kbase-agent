@@ -217,9 +217,12 @@
         try {
           const e = JSON.parse(dataStr);
           if (e && e.type === 'step') {
-            if (e.node === 'agent' && e.text) makePreview().textContent = '… ' + e.text;
-            else if (e.node === 'tools' && Array.isArray(e.tool_calls) && e.tool_calls.length)
-              makePreview().textContent = '工具调用中：' + e.tool_calls.map(t => t.name || '').join(', ');
+            // 工具名要看 e.tool_calls：服务端只在 agent 节点事件上带这个字段
+            // （tools 事件里最后一条是 ToolMessage，没有 tool_calls），所以判在前、
+            // 且不按 node 过滤——否则"工具调用中：xxx"这条永远显示不出来。
+            if (Array.isArray(e.tool_calls) && e.tool_calls.length)
+              makePreview().textContent = '工具调用中：' + e.tool_calls.map(t => t.name || '').join('、');
+            else if (e.node === 'agent' && e.text) makePreview().textContent = '… ' + e.text;
             else if (e.node === 'tools') makePreview().textContent = '工具调用完成…';
           } else if (e && e.type === 'error') {
             throw new Error(e.message || 'Agent 错误');

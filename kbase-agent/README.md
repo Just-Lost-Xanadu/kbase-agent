@@ -87,6 +87,8 @@ API：
 
 40 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
 
+**口径边界（别被追问才想起来）**：40 条都是**单轮**提问（每条走新 thread，不共享上下文），所以**多轮行为不在评测覆盖内**。同一 session 续聊时历史会累积，模型可能直接基于上下文作答而**不再调工具**，该轮 `sources` 因此为空——引用只统计**本轮**工具返回，历史轮次的来源不会带过来（`data/business` 个人数据工具输出也不含【来源：】标记，本来就不贡献 sources）。
+
 ## Agent 决策流程
 
 ```mermaid
@@ -128,6 +130,7 @@ flowchart TD
 - `MAX_RECURSION` + prompt 第 5 条 `max_steps` + 重复调用检测 = 三道防死循环。
 - 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**替换已有同名文档后请删 `data/chroma/` 重建索引**（增量新增文件可直接 `python scripts/index_docs.py`）。
 - 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户区分与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。
+- 同一 session 的**并发**请求未做串行保护：LangGraph 状态按 `thread_id` 记，同 thread 并发属"后写覆盖"（多路并发不会报错，但两轮谁先落地不保证）。生产化需按 session 串行或进队列。
 - 多轮对话历史目前全量进上下文（checkpoint 保存全量消息）；超长会话建议后续加历史压缩/裁剪（如 summarize 节点或 max_turns 截断），列为方向。
 - 架构边界明确：当前是**单 Agent + MCP 工具层**；多 Agent 编排 / Skills / 工具失败重试与降级 / prompt 注入防护 是后续方向——面试可主动讲思路，但不写进"已完成"能力。
 
