@@ -9,7 +9,7 @@
 GET /api/runs 查询——回答"调试 Agent 时怎么观察某次跑了哪些节点/花了多少 token/成本"。
 
 成本口径：cost 是"估算值"——由 estimate_cost() 按 settings 里每百万 token 单价（env:
-LLM_INPUT_PRICE/LLM_OUTPUT_PRICE）乘 token 数算得，非真实账单。面试时口径说"单价来自配置、
+LLM_PRICE_INPUT/LLM_PRICE_OUTPUT）乘 token 数算得，非真实账单。面试时口径说"单价来自配置、
 估算而非计费回执"更稳。
 """
 

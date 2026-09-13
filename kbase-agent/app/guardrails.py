@@ -17,7 +17,8 @@ from dataclasses import dataclass
 class AgentLimits:
     """护栏的默认档位（单一事实来源）。
 
-    说明：这些值也可由 .env 覆盖（config 里有对应项），dataclass 只是写死的默认值。
+    说明：max_steps / step_timeout_seconds / max_tool_output_chars 是写死的默认值（暂无 .env 项）；
+    仅 recursion_limit 可由 .env 的 MAX_RECURSION 覆盖（见 config.py）。
     max_steps 同时被 prompt 里的 max_iterations 文案与 default_recursion_limit 引用——
     改这里要同步确认两处口径，不要只动一处造成"prompt 承诺 25 步，框架却 20 步就掐"这类不一致。
     """
