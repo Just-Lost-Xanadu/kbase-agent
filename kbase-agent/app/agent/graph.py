@@ -118,6 +118,13 @@ def _parse_sources(messages: list) -> list[str]:
 
 
 def _final_answer(messages: list) -> str:
+    """取"最后一条非工具调用的 AI 消息"作为答案。
+
+    调用方必须传**本轮新增的消息切片**（见 AgentRuntime.ainvoke / astream 的 fresh）：
+    若把完整历史传进来，本轮最终 AI 消息 content 为空串/None 时（模型偶发空回复），
+    这里会一路往前找到**上一轮的答案**并当成本轮 answer 返回——既写进会话记录，
+    又会让端到端评测的回答率虚高。限定在本轮消息里取，取不到就如实返回空串。
+    """
     for message in reversed(messages):
         if (
             getattr(message, "type", "") == "ai"
@@ -306,10 +313,11 @@ class AgentRuntime:
         lc_messages, config, prior = await self._build_input(messages, session_id)
         state = await self.graph.ainvoke({"messages": lc_messages}, config=config)
         final_messages = state["messages"]
-        # 只从本轮新增的消息里解析来源（历史轮次来源不累计）
+        # 答案与来源都只从本轮新增的消息里取：
+        # sources 不累计历史轮次；answer 也不回退到上一轮（见 _final_answer 说明）
         fresh = final_messages[prior:]
         return {
-            "answer": _final_answer(final_messages),
+            "answer": _final_answer(fresh),
             "sources": _parse_sources(fresh),
         }
 
@@ -324,9 +332,10 @@ class AgentRuntime:
         snapshot = await self.graph.aget_state(config)
         values = snapshot.values or {}
         final_messages = values.get("messages", [])
+        # 与 ainvoke 同口径：答案与来源都只看本轮新增消息
         fresh = final_messages[prior:]
         yield {
-            "answer": _final_answer(final_messages),
+            "answer": _final_answer(fresh),
             "sources": _parse_sources(fresh),
         }
 

@@ -29,8 +29,8 @@ app/
   data/
     docs/                # 知识库语料：6 篇 md + docx/xlsx/pdf 样例，统一分块入库（_ 前缀忽略）
     business/            # 业务系统个人数据（首次调用自动生成示例）
-    checkpoints.sqlite   # 会话 checkpoint + 消息记录（自动生成；.gitignore 已忽略 *.db）
-eval/                  # 40 条评测集（检索层 eval.py / 端到端 eval_e2e.py）
+    checkpoints.sqlite   # 会话 checkpoint + 消息记录（自动生成；.gitignore 已忽略 *.sqlite）
+eval/                  # 40 条评测集 + 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
 tests/                 # smoke + 纯逻辑单测
@@ -117,7 +117,7 @@ flowchart TD
 | 标准化评估闭环 | 40 条金标集 + 两层 Harness | `eval.py` 检索层（离线零成本）+ `eval_e2e.py` Agent 层（`--tag` 落报告、`--compare` 回归 diff，指标含回答率/引用覆盖/成本） |
 | Agent 架构与工具调用 | **单 Agent** ReAct 式工具循环 + MCP 工具层 | LangGraph `agent→tools` 条件边做工具路由；决策在模型、编排在框架；多 Agent/Skills 为下一阶段方向（**未实现，不宣称**） |
 | 工程化与生产落地 | 上下文管理 / 工具失效处理 / 持久化 / 可观测 | 工具输出截断、重复工具调用判重（窗口=单次运行内 25 步）防死循环、超时异常结构化回填、checkpoint 断点续聊（SQLite）、trace/成本/历史会话 |
-| 权限与重试降级 | 见"已知取舍"（生产化方向） | 按用户鉴权、工具失败重试/降级列为生产化改进，**未实现不宣称** |
+| 权限与重试降级 | 见"已知取舍"（生产化方向） | 按用户区分权限、工具失败重试/降级列为生产化改进，**未实现不宣称** |
 
 ## 已知取舍 / 改进方向
 
@@ -127,7 +127,7 @@ flowchart TD
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
 - `MAX_RECURSION` + prompt 第 5 条 `max_steps` + 重复调用检测 = 三道防死循环。
 - 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**替换已有同名文档后请删 `data/chroma/` 重建索引**（增量新增文件可直接 `python scripts/index_docs.py`）。
-- 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户鉴权与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。
+- 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户区分与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。
 - 多轮对话历史目前全量进上下文（checkpoint 保存全量消息）；超长会话建议后续加历史压缩/裁剪（如 summarize 节点或 max_turns 截断），列为方向。
 - 架构边界明确：当前是**单 Agent + MCP 工具层**；多 Agent 编排 / Skills / 工具失败重试与降级 / prompt 注入防护 是后续方向——面试可主动讲思路，但不写进"已完成"能力。
 

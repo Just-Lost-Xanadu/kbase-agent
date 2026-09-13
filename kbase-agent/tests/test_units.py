@@ -92,6 +92,20 @@ def test_parse_sources_from_content_blocks():
     assert _parse_sources(messages) == ["员工手册_示例.md"]
 
 
+def test_final_answer_does_not_fall_back_to_previous_turn():
+    """本轮最终 AI 消息为空时，答案不能回退到上一轮（否则等于把旧答案当新答案）。"""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.agent.graph import _final_answer
+
+    previous_turn = [AIMessage(content="上一轮的答案")]
+    current_turn = [HumanMessage(content="新问题"), AIMessage(content="")]
+    # 本轮切片里没有可用答案 → 如实返回空，而不是上一轮的"上一轮的答案"
+    assert _final_answer(current_turn) == ""
+    # 对照：若误传完整历史，就会拿到上一轮的答案（这就是修掉的那个回退）
+    assert _final_answer(previous_turn + current_turn) == "上一轮的答案"
+
+
 def test_is_duplicate_call_full_history():
     # A→B→A 式的隔步重复也要判出（全历史判重，而非仅相邻）
     history = [
