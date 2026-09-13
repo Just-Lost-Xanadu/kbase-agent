@@ -7,7 +7,7 @@ graph 里只调用它们并把结果写回状态，方便单独用 pytest 测每
 三座防线（面试必讲三层）：
   1) recursion_limit（框架层）   —— LangGraph 节点步数上限，掐停无限循环；见 default_recursion_limit。
   2) 工具输出截断（上下文层）    —— 超长工具结果只保留头尾+中间提示，防把上下文塞爆；见 truncate_tool_output。
-  3) 轮内重复调用判重（逻辑层）  —— 同一轮 A→B→A 原地打转时拦截并让模型收尾；见 is_duplicate_call。
+  3) 重复工具调用判重（逻辑层，窗口 = 最近 max_steps 次调用）—— A→B→A 原地打转时拦截并让模型收尾；见 is_duplicate_call。
 每层答"哪一层、在哪拦"是面试高频点。
 """
 from dataclasses import dataclass
