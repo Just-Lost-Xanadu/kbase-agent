@@ -12,7 +12,7 @@ app/
   store.py             # 会话/消息记录 + run_traces 观测表（读历史/观测接口数据源）
   observability.py     # 轻量 trace：节点耗时/token/成本（contextvars，不侵入 LangGraph state）
   api/
-    chat.py            # 请求/响应模型(内联) + POST /chat（同步）+ POST /chat/stream（SSE 流式）
+    chat.py            # 请求/响应模型(内联) + POST /chat（同步）+ POST /chat/stream（SSE 节点级流式）
   retrieval/
     loader.py          # 文档解析 md/txt/docx/xlsx/pdf（文本层抽取，_ 前缀忽略）
     chunker.py         # fixed vs recursive 切分
@@ -61,7 +61,7 @@ python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍
 python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判回答/引用/成本）
 ```
 
-网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖）。页面走 **SSE 流式（`/api/chat/stream`）**，提问后可见 Agent 逐步工具调用（检索→查库）与最终回答。左侧会话栏可**新建 / 回看 / 切换历史会话**：消息与 checkpoint 落 `data/checkpoints.sqlite`，刷新页面甚至重启服务后仍能恢复并继续对话。
+网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖）。页面走 **SSE 节点级流式（`/api/chat/stream`）**，提问后可见 Agent 逐步工具调用（检索→查库）与最终回答。左侧会话栏可**新建 / 回看 / 切换历史会话**：消息与 checkpoint 落 `data/checkpoints.sqlite`，刷新页面甚至重启服务后仍能恢复并继续对话。
 
 API：
 - `POST /api/chat`：同步返回 `{answer, sources}`。
@@ -98,7 +98,7 @@ flowchart TD
     E -- 否 --> B
     E -- 是 --> F[生成回答 + 引用来源]
     C -- 否 --> F
-    F --> G[SSE 流式返回前端]
+    F --> G[SSE 节点级流式返回前端]
     B -. 护栏 .-> H[recursion_limit / 单步超时 /<br/>输出截断 / 重复调用检测]
     H -. 中断并基于现有信息收尾 .-> F
 ```
@@ -108,7 +108,7 @@ flowchart TD
 - **框架**：LangGraph 有状态图、SQLite 断点续聊（AsyncSqliteSaver + WAL，重启不丢会话；高并发生产可换 Postgres）；AutoGen 并入 Microsoft Agent Framework 后我以 LangGraph 为主线。
 - **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。
 - **RAG**：混合检索（向量 + BM25 做 RRF）去抖 + 可选重排 + 引用溯源 + 评测集验证，坏例能说清怎么调好的。
-- **工程化**：SSE 流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
+- **工程化**：SSE 节点级流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
 
 ## 对标 JD 主要能力（面试话术）
 
