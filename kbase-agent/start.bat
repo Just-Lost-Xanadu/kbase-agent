@@ -1,5 +1,5 @@
 @echo off
-rem kbase-agent ä¸€é”®å¯åŠ¨ï¼ˆWindows åŒå‡»å…¥å£ï¼‰
+rem kbase-agent Ò»¼üÆô¶¯£¨Windows Ë«»÷Èë¿Ú£©
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
 pause
