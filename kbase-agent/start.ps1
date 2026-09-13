@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  kbase-agent 一键启动（Windows PowerShell）
 #  用法：双击 start.bat，或在此目录执行  ./start.ps1
 #  可选参数：-NoStart  只做检查/补装/建索引，不拉起服务
@@ -67,11 +67,20 @@ $keyLine = Get-Content $envFile -Raw
 if ($keyLine -match '(?m)^DEEPSEEK_API_KEY=(.+)$') {
     $key = $Matches[1].Trim()
 } else { $key = '' }
-if ([string]::IsNullOrWhiteSpace($key) -or $key -eq 'sk-your-key') {
-    Warn "DEEPSEEK_API_KEY 为空或仍是占位符：网页/对话会报 503，但建索引与评测不受影响。"
-    Warn "要体验 Agent 对话，请编辑 $envFile 填入真实 key 后重跑。"
+# 环境变量优先：load_dotenv() 默认不覆盖已存在的环境变量，所以 key 放系统环境变量
+# （setx DEEPSEEK_API_KEY ...）时 .env 留占位符也能正常跑，且 .env 可安全拷贝给别人。
+if (-not [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+    $keySource = '系统环境变量'
+    $key = $env:DEEPSEEK_API_KEY
 } else {
-    Write-Host "DEEPSEEK_API_KEY 已配置（${key}... 前4位）"
+    $keySource = '.env'
+}
+if ([string]::IsNullOrWhiteSpace($key) -or $key -eq 'sk-your-key') {
+    Warn "DEEPSEEK_API_KEY 未配置（.env 与进程环境变量里都没有）：网页/对话会报 503，但建索引与评测不受影响。"
+    Warn "要体验 Agent 对话，请编辑 $envFile 填入真实 key（或 setx DEEPSEEK_API_KEY 后开新终端）再重跑。"
+} else {
+    # 不回显 key 的任何片段，避免截图/录屏时泄露
+    Write-Host "DEEPSEEK_API_KEY 已配置（来源：$keySource，值不显示）"
 }
 
 # ---------- 5. 索引 ----------

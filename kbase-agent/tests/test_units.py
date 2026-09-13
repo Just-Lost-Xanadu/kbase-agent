@@ -27,12 +27,20 @@ def test_truncate_keeps_head_tail_and_marker():
 
 
 def test_fixed_size_chunk_windows():
-    text = "一" * 1000
+    # 文本必须"逐位置可区分"：若用 "一"*1000 或周期为 10 的数字串，偏移量又都是周期整数倍，
+    # 任何切法切出的片段都长得一样，断言会恒真、根本测不出 overlap。
+    # 这里每 4 个字符一个唯一编号（0000/0001/...），错一格就必然失败。
+    text = "".join(f"{i:04d}" for i in range(250))
+    assert len(text) == 1000
     chunks = fixed_size_chunk(text, chunk_size=400, overlap=100)
-    assert len(chunks) >= 2
+    # step = chunk_size - overlap = 300 → 起点 0/300/600/900
+    assert len(chunks) == 4
     assert all(len(c) <= 400 for c in chunks)
-    # 相邻块有 overlap 交集，避免断点丢信息
-    assert chunks[0][-100:] == chunks[1][:100]
+    # 相邻块重叠 100 字符，且必须是同一段原文（错位/无重叠都会失败）
+    assert chunks[1][:100] == chunks[0][-100:] == text[300:400]
+    # 非重叠部分按 step 前进
+    assert chunks[1][100:] == text[400:700]
+    assert chunks[2][100:] == text[700:1000]
 
 
 def test_split_documents_ids():
