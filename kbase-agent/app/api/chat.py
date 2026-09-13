@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from fastapi import APIRouter, HTTPException, Request
@@ -63,6 +64,25 @@ async def _save_trace(req: ChatRequest, recorder_summary: dict, answer: str, sou
     )
 
 
+async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
+    """落库：有答案才写会话记录，trace 则无论成败都写（记录失败不影响主流程）。
+
+    result=None 表示本轮没有产出答案（执行失败或客户端断连）——此时只写 trace，
+    保持原有语义（历史里不出现"只有问题没有答案"的轮次）。
+    """
+    answer = (result or {}).get("answer", "")
+    sources = (result or {}).get("sources", []) or []
+    if result is not None:
+        try:
+            await _record_turn(req, answer, sources)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        await _save_trace(req, rec.summarize(), answer, sources)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, request: Request) -> ChatResponse:
     from app.observability import Recorder, reset_recorder, set_recorder
@@ -74,26 +94,26 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
 
     rec = Recorder(question=_question_of(req))
     token = set_recorder(rec)
+    result: dict | None = None
     try:
         result = await runtime.ainvoke(
             [m.model_dump() for m in req.messages], session_id=req.session_id
         )
     except HTTPException:
         raise
+    except asyncio.CancelledError:
+        # 客户端中途断开：checkpoint 可能已由 graph 提交，trace 不能丢。
+        # CancelledError 属 BaseException，不会被下面的 except Exception 捕获，故单列；
+        # shield 保证这次写入不被取消打断。
+        await asyncio.shield(_persist(req, rec, None))
+        raise
     except Exception as exc:  # noqa: BLE001
         rec.error = str(exc)[:300]
-        try:
-            await _save_trace(req, rec.summarize(), "", [])
-        except Exception:  # noqa: BLE001
-            pass
+        await asyncio.shield(_persist(req, rec, None))
         raise HTTPException(status_code=502, detail=f"Agent 执行失败：{exc}") from exc
     finally:
         reset_recorder(token)
-    try:
-        await _record_turn(req, result["answer"], result["sources"])
-        await _save_trace(req, rec.summarize(), result["answer"], result["sources"])
-    except Exception:  # noqa: BLE001
-        pass  # 记录失败不影响主流程回答
+    await _persist(req, rec, result)
     return ChatResponse(answer=result["answer"], sources=result["sources"])
 
 
@@ -106,20 +126,19 @@ async def chat_stream(req: ChatRequest, request: Request):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     async def event_stream():
+        from app.agent.graph import _text_of
         from app.observability import Recorder, reset_recorder, set_recorder
 
         rec = Recorder(question=_question_of(req))
         token = set_recorder(rec)
+        persisted = False
         try:
             async for update in runtime.astream(
                 [m.model_dump() for m in req.messages], session_id=req.session_id
             ):
                 if "answer" in update:  # 收尾事件
-                    try:
-                        await _record_turn(req, update["answer"], update.get("sources", []))
-                        await _save_trace(req, rec.summarize(), update["answer"], update.get("sources", []))
-                    except Exception:  # noqa: BLE001
-                        pass
+                    await _persist(req, rec, update)
+                    persisted = True
                     yield {"event": "done", "data": json.dumps(update, ensure_ascii=False)}
                     continue
                 for node, payload in update.items():
@@ -130,7 +149,9 @@ async def chat_stream(req: ChatRequest, request: Request):
                         # 只把 agent 节点文本上行；tools 节点的 ToolMessage 原文
                         # 含工具输出，可能很大或含内部信息，不下发给前端
                         if node == "agent" and getattr(last, "content", None):
-                            event["text"] = str(last.content)[:500]
+                            # 与 graph._text_of 同口径：content 可能是 content block 列表，
+                            # 直接 str() 会把 Python repr 发给前端
+                            event["text"] = _text_of(last.content)[:500]
                         if getattr(last, "tool_calls", None):
                             event["tool_calls"] = [
                                 {"name": c.get("name"), "args": c.get("args")}
@@ -139,10 +160,8 @@ async def chat_stream(req: ChatRequest, request: Request):
                     yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
         except Exception as exc:  # noqa: BLE001
             rec.error = str(exc)[:300]
-            try:
-                await _save_trace(req, rec.summarize(), "", [])
-            except Exception:  # noqa: BLE001
-                pass
+            await _persist(req, rec, None)
+            persisted = True
             yield {
                 "event": "error",
                 "data": json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False),
@@ -150,6 +169,10 @@ async def chat_stream(req: ChatRequest, request: Request):
             return
         finally:
             reset_recorder(token)
+            if not persisted:
+                # 客户端断连时生成器被关闭（GeneratorExit），finally 里不能 await，
+                # 交给后台任务补写 trace，避免这次运行在 /api/runs 里查不到。
+                asyncio.create_task(_persist(req, rec, None))
         yield {"event": "end", "data": "[DONE]"}
 
     return EventSourceResponse(event_stream())

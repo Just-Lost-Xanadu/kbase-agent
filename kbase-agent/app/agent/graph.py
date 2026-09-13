@@ -37,8 +37,9 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     # 引用来源不放进图状态：最终答案的 sources 由 ainvoke/astream 收尾时
     # 从消息流解析（见 _parse_sources），避免图里维护冗余字段。
-    # 工具调用去重历史：仅保留最近 max_steps 次（窗口在 tools_node 维护），
-    # 覆盖"本轮 A→B→A 原地打转"，同时放行跨轮次的重复提问。
+    # 工具调用去重历史：仅保留最近 max_steps 次（窗口在 tools_node 维护）。
+    # 注意窗口按 thread 状态累计、不随轮次清零：可覆盖"本轮 A→B→A 原地打转"，
+    # 但同一 session 隔几轮再问同一问题时，只要仍在窗口内也会被判重跳过（已知取舍）。
     tool_call_history: list[tuple[str, str]]
 
 
@@ -121,7 +122,8 @@ def _final_answer(messages: list) -> str:
             and not getattr(message, "tool_calls", None)
             and getattr(message, "content", "")
         ):
-            return str(message.content)
+            # 用 _text_of 收口：content 若是 content block 列表，str() 会得到 Python repr
+            return _text_of(message.content)
     return ""
 
 
@@ -174,9 +176,10 @@ def _build_graph(llm, tools: list, checkpointer):
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None) or []
         new_messages: list = []
-        # 判重窗口 = max_steps：单次运行最多 max_steps 次工具调用，窗口内即可覆盖
-        # 本轮 A→B→A 式原地打转；窗口外的旧调用（如之前轮次的相同提问）允许重跑，
-        # 避免"隔几轮再问同一个问题"被全历史判重误拦。
+        # 判重窗口 = 最近 max_steps 次工具调用。history 存在 checkpoint 里、按 thread
+        # 累计（不随轮次清零）：窗口内覆盖本轮 A→B→A 式原地打转，窗口外的旧调用允许重跑。
+        # 已知取舍：同一 session 在窗口内重复提问会被判重跳过，模型据已有信息作答；
+        # 生产化应改为"按轮次清零 + 允许显式重新检索"（见 README 改进方向）。
         history = list(state.get("tool_call_history", []))[-AgentLimits.max_steps :]
 
         for call in calls:
@@ -359,7 +362,8 @@ async def create_runtime() -> AgentRuntime:
     (aclose/close)，不能靠模块级散落。所以返回 AgentRuntime(封装 graph+tools+saver+conn)
     并约定由调用方负责用毕 aclose()：这是"用对象管理成对分配/释放资源(open/close)"的典型场景，
     普通函数无法靠返回值表达"记得关连接"的约束。
-    （内部 get_tools 抛错也会先关掉已开 sqlite 连接再 raise，避免泄漏 —— 见下方 try/except。）
+    （内部 get_tools / make_llm / 建图任一步抛错，都会先关掉已开 sqlite 连接再 raise，
+    避免泄漏 —— 见下方 try/except。）
     """
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
@@ -379,11 +383,13 @@ async def create_runtime() -> AgentRuntime:
     )
     try:
         tools = await client.get_tools()
+        llm = make_llm(temperature=settings.temperature).bind_tools(tools)
+        graph = _build_graph(llm, tools, checkpointer=saver)
     except Exception:
+        # 任一步失败都要先关掉已开的 sqlite 连接：缺 key 时 make_llm 会抛错，
+        # 而 services.ensure_services 允许每次请求重试 —— 不关就会每请求泄漏一个连接+线程。
         await conn.close()
         raise
-    llm = make_llm(temperature=settings.temperature).bind_tools(tools)
-    graph = _build_graph(llm, tools, checkpointer=saver)
     return AgentRuntime(graph=graph, tools=tools, saver=saver, conn=conn)
 
 

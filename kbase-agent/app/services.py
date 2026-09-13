@@ -31,11 +31,14 @@ async def ensure_services(app: FastAPI):
         # 1) 检索管道：已有索引直接懒加载；没有则自动建（首次含 embedding 模型下载）
         from app.retrieval.pipeline import RetrievalPipeline
 
+        # 注意：is_indexed()/index()/ensure_ready() 都是同步阻塞调用（读文档、embedding、
+        # 写 Chroma，首次还会下载模型）。直接在事件循环里 await 会卡住整个服务，
+        # 必须丢进线程执行。
         pipeline = RetrievalPipeline()
-        if not pipeline.is_indexed():
+        if not await asyncio.to_thread(pipeline.is_indexed):
             logger.info("检测到空索引，自动建索引（首次使用会下载 embedding 模型）…")
-            pipeline.index()
-        pipeline.ensure_ready()
+            await asyncio.to_thread(pipeline.index)
+        await asyncio.to_thread(pipeline.ensure_ready)
 
         # 2) 把管道挂给进程内 MCP 工具定义（调试/直连时用）
         from app.mcp import servers as mcp_servers
