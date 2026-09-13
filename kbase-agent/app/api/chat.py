@@ -9,6 +9,9 @@ from app.services import ensure_services
 
 router = APIRouter()
 
+# 断连补写任务池：仅用于持有强引用（asyncio 对 task 只保留弱引用），任务结束即移除
+_finalizer_tasks: set = set()
+
 
 # ---- 请求/响应模型（原 app/api/schemas.py，并入本文件：仅 /chat 系列接口使用）----
 class ChatMessage(BaseModel):
@@ -113,7 +116,8 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
         raise HTTPException(status_code=502, detail=f"Agent 执行失败：{exc}") from exc
     finally:
         reset_recorder(token)
-    await _persist(req, rec, result)
+    # 成功路径同样 shield：答案已产出，此刻若客户端断开也不能丢掉这次 trace
+    await asyncio.shield(_persist(req, rec, result))
     return ChatResponse(answer=result["answer"], sources=result["sources"])
 
 
@@ -137,8 +141,10 @@ async def chat_stream(req: ChatRequest, request: Request):
                 [m.model_dump() for m in req.messages], session_id=req.session_id
             ):
                 if "answer" in update:  # 收尾事件
-                    await _persist(req, rec, update)
+                    # 先置位再写入：若这次写入途中被取消，finally 里不能再补一次，
+                    # 否则同一次运行会落两条 trace（后一条答案为空）
                     persisted = True
+                    await _persist(req, rec, update)
                     yield {"event": "done", "data": json.dumps(update, ensure_ascii=False)}
                     continue
                 for node, payload in update.items():
@@ -172,7 +178,14 @@ async def chat_stream(req: ChatRequest, request: Request):
             if not persisted:
                 # 客户端断连时生成器被关闭（GeneratorExit），finally 里不能 await，
                 # 交给后台任务补写 trace，避免这次运行在 /api/runs 里查不到。
-                asyncio.create_task(_persist(req, rec, None))
+                # 必须持有强引用：asyncio 只保留弱引用，任务可能在完成前被 GC 掉。
+                try:
+                    task = asyncio.create_task(_persist(req, rec, None))
+                except RuntimeError:
+                    pass  # 事件循环已关闭，补写无望
+                else:
+                    _finalizer_tasks.add(task)
+                    task.add_done_callback(_finalizer_tasks.discard)
         yield {"event": "end", "data": "[DONE]"}
 
     return EventSourceResponse(event_stream())

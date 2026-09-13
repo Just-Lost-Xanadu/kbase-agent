@@ -51,12 +51,12 @@ async def ensure_services(app: FastAPI):
         try:
             runtime = await create_runtime()
         except Exception as exc:
-            logger.warning(
-                "Agent runtime 初始化失败（检查 DEEPSEEK_API_KEY 与网络）：%s", exc
-            )
+            logger.warning("Agent runtime 初始化失败：%s: %s", type(exc).__name__, exc)
             raise RuntimeError(
-                "Agent 引擎未就绪：请确认 .env 已填 DEEPSEEK_API_KEY，"
-                "并已 pip install -e '.[dev]'（含 mcp/adapters 依赖）"
+                "Agent 引擎未就绪。常见原因：① .env 里没有有效的 DEEPSEEK_API_KEY；"
+                "② 依赖缺失，执行 pip install -e . 即可（mcp / langchain-mcp-adapters 是基础依赖，"
+                ".[dev] 只额外装 pytest/httpx）；③ MCP 子进程启动或 checkpoint 库异常。"
+                f"原始错误：{type(exc).__name__}: {exc}"
             ) from exc
 
         app.state.pipeline = pipeline

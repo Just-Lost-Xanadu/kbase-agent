@@ -19,8 +19,9 @@ class AgentLimits:
 
     说明：max_steps / step_timeout_seconds / max_tool_output_chars 是写死的默认值（暂无 .env 项）；
     仅 recursion_limit 可由 .env 的 MAX_RECURSION 覆盖（见 config.py）。
-    max_steps 同时被 prompt 里的 max_iterations 文案与 default_recursion_limit 引用——
+    max_steps 同时被 prompt 第 5 条（写明"最多执行 N 步工具调用"）与 default_recursion_limit 引用——
     改这里要同步确认两处口径，不要只动一处造成"prompt 承诺 25 步，框架却 20 步就掐"这类不一致。
+    （另注意：.env 里的 MAX_RECURSION 会直接覆盖推导值，设小了同样会破坏这个一致性。）
     """
     max_steps: int = 25                    # 提示词/框架的"一次回答最多工具调用次数"
     step_timeout_seconds: int = 120        # 单次工具调用的顶层兜底超时(包住整个 stdio 往返)

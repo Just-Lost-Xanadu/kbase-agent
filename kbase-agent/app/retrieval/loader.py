@@ -6,9 +6,12 @@ source 用文件名（含扩展名），与 eval/questions.jsonl 的 expected_so
 扫描件/图片类 PDF 没有文本层，需 OCR，列为扩展。
 """
 
+import logging
 from pathlib import Path
 
 SUPPORTED_EXTS = {".md", ".txt", ".docx", ".xlsx", ".pdf"}
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_plain_text(path: Path) -> str | None:
@@ -109,7 +112,15 @@ def load_documents(source_dir: str | Path) -> list[dict]:
             continue
         if path.name.startswith("_"):
             continue
-        content = _extract(path)
+        try:
+            content = _extract(path)
+        except Exception as exc:  # noqa: BLE001
+            # 单个文件损坏（例如能打开但中途解析失败的 docx/xlsx/pdf）不应拖垮整库建索引，
+            # 否则首次自动建索引会直接变成 503
+            logger.warning(
+                "跳过无法解析的文件 %s：%s: %s", path.name, type(exc).__name__, exc
+            )
+            continue
         if content:
             documents.append({"content": content, "source": path.name})
     if not documents:

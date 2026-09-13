@@ -37,9 +37,10 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     # 引用来源不放进图状态：最终答案的 sources 由 ainvoke/astream 收尾时
     # 从消息流解析（见 _parse_sources），避免图里维护冗余字段。
-    # 工具调用去重历史：仅保留最近 max_steps 次（窗口在 tools_node 维护）。
-    # 注意窗口按 thread 状态累计、不随轮次清零：可覆盖"本轮 A→B→A 原地打转"，
-    # 但同一 session 隔几轮再问同一问题时，只要仍在窗口内也会被判重跳过（已知取舍）。
+    # 工具调用去重历史：只保留最近 max_steps 次（窗口在 tools_node 维护）。
+    # 实际生效范围是"单次运行内"：LangGraph 序列化会把 tuple 还原成 list，
+    # 跨轮次读回的条目与本次的 tuple key 永不相等 —— 这正是期望行为：
+    # 同会话重复提问应当重新检索拿新数据，而不是复用上一轮的旧上下文。
     tool_call_history: list[tuple[str, str]]
 
 
@@ -50,14 +51,15 @@ def make_llm(temperature: float = 0.0) -> ChatOpenAI:
     """构造 OpenAI 兼容的 LLM 客户端（默认指向 DeepSeek）。
 
     未配置 key（缺失或仍是占位符 sk-your-key）时抛明确中文报错，避免带占位 key 悄悄调失败。
-    .env 需位于当前工作目录（从项目根启动 uvicorn/脚本），由 app.config 的 load_dotenv 读取。
+    .env 由 app.config 的 load_dotenv() 定位（从 app/config.py 所在目录向上查找，与 CWD 无关）；
+    但 CHROMA_PATH / CHECKPOINT_DB 是相对路径，因此仍建议从项目根（kbase-agent/）启动。
     """
     if not settings.api_key or settings.api_key == "sk-your-key":
         raise ValueError(
             "未配置有效的 DEEPSEEK_API_KEY。请在项目根目录创建 .env"
             "（复制 .env.example 并填入真实 key，占位符 sk-your-key 不会被接受），"
             "或先执行：$env:DEEPSEEK_API_KEY='sk-真实key'。"
-            "注意 .env 需位于当前工作目录（从项目根启动 uvicorn/脚本）。"
+            "注意 CHROMA_PATH / CHECKPOINT_DB 是相对路径，请从 kbase-agent 目录启动。"
         )
     return ChatOpenAI(
         model=settings.model_name,
@@ -176,10 +178,10 @@ def _build_graph(llm, tools: list, checkpointer):
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None) or []
         new_messages: list = []
-        # 判重窗口 = 最近 max_steps 次工具调用。history 存在 checkpoint 里、按 thread
-        # 累计（不随轮次清零）：窗口内覆盖本轮 A→B→A 式原地打转，窗口外的旧调用允许重跑。
-        # 已知取舍：同一 session 在窗口内重复提问会被判重跳过，模型据已有信息作答；
-        # 生产化应改为"按轮次清零 + 允许显式重新检索"（见 README 改进方向）。
+        # 判重窗口 = 最近 max_steps 次工具调用，实际只在"本次运行内"能命中：
+        # history 存进 checkpoint 后 tuple 会被序列化成 list，跨轮次读回时
+        # tuple key 与 list 条目不相等，因此不会误拦跨轮次的合法重复查询
+        # （跨轮次重复提问本就应当重新检索，见 guardrails.is_duplicate_call）。
         history = list(state.get("tool_call_history", []))[-AgentLimits.max_steps :]
 
         for call in calls:
@@ -347,10 +349,16 @@ async def _open_checkpointer() -> tuple[AsyncSqliteSaver, aiosqlite.Connection]:
     db_path = Path(settings.checkpoint_db).resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(str(db_path))
-    await conn.execute("PRAGMA journal_mode=WAL")
-    await conn.execute("PRAGMA busy_timeout=5000")
-    saver = AsyncSqliteSaver(conn)
-    await saver.setup()
+    try:
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA busy_timeout=5000")
+        saver = AsyncSqliteSaver(conn)
+        await saver.setup()
+    except BaseException:
+        # 建表/PRAGMA 失败、或握手期间被取消（CancelledError 属 BaseException）：
+        # 都要先关掉刚开的连接再抛出，否则这个连接会一直挂着
+        await conn.close()
+        raise
     return saver, conn
 
 
@@ -382,12 +390,15 @@ async def create_runtime() -> AgentRuntime:
         }
     )
     try:
+        # 先校验 key（纯本地、零成本）再拉起 MCP 子进程：否则缺 key 时每次重试
+        # 都要白付一次子进程启动 + 索引加载，才在 make_llm 处报错。
+        llm = make_llm(temperature=settings.temperature)
         tools = await client.get_tools()
-        llm = make_llm(temperature=settings.temperature).bind_tools(tools)
+        llm = llm.bind_tools(tools)
         graph = _build_graph(llm, tools, checkpointer=saver)
-    except Exception:
-        # 任一步失败都要先关掉已开的 sqlite 连接：缺 key 时 make_llm 会抛错，
-        # 而 services.ensure_services 允许每次请求重试 —— 不关就会每请求泄漏一个连接+线程。
+    except BaseException:
+        # 任一步失败（含 CancelledError 这类 BaseException）都要先关掉已开的 sqlite
+        # 连接：services.ensure_services 允许每次请求重试，不关就每请求泄漏一个连接+线程。
         await conn.close()
         raise
     return AgentRuntime(graph=graph, tools=tools, saver=saver, conn=conn)
