@@ -10,6 +10,7 @@
     python scripts/eval_e2e.py --tag v2-prompt             # 改动后再跑一次
     python scripts/eval_e2e.py --tag v2-prompt --compare baseline   # 打印与基线的回归 diff
     python scripts/eval_e2e.py --limit 5                   # 冒烟（不落报告）
+    python scripts/eval_e2e.py --reanalyze                 # 只重算已有报告的指标（不调 API、不要 key）
 报告产物：docs/eval-reports/{tag}.json（含 per-case，可被 --compare 引用）
 """
 
@@ -39,8 +40,40 @@ def _load_cases() -> list[dict]:
     return [json.loads(line) for line in EVAL_FILE.read_text(encoding="utf-8").splitlines()]
 
 
-def _metrics(results: list[dict]) -> dict:
+def _percentile(values: list[int | float], q: float) -> float:
+    """线性插值分位数（与 numpy.percentile 默认口径一致，避免依赖 numpy）。
+
+    n=40、q=0.95 时落在这两份报告的实测区间内；样本极少（n<3）时退化为最大/最小值，
+    口径写进 README，避免"p95 是怎么算的"被追问时说不出。
+    """
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    pos = q * (len(ordered) - 1)
+    low = int(pos)
+    high = min(low + 1, len(ordered) - 1)
+    frac = pos - low
+    return float(ordered[low] + (ordered[high] - ordered[low]) * frac)
+
+
+def _latency(results: list[dict]) -> dict:
+    """从已有 per-case 里算延迟分位（纯离线，数据来自 recorder 的 duration_ms）。
+
+    面试口径：p50/p95 是"单次问答端到端耗时"，含 MCP 子进程启动 + 检索 + LLM 往返；
+    样本是 40 条单轮金标集，不是线上流量，只用于改动前后的相对比较。
+    """
+    durations = [r["duration_ms"] for r in results if r.get("duration_ms") is not None]
     return {
+        "p50_duration_ms": round(_percentile(durations, 0.5)),
+        "p95_duration_ms": round(_percentile(durations, 0.95)),
+        "max_duration_ms": round(max(durations)) if durations else 0,
+    }
+
+
+def _metrics(results: list[dict]) -> dict:
+    metrics = {
         "cases": len(results),
         "answer_rate": round(hit_rate([{"hit": r["answer_nonempty"]} for r in results]), 4),
         "citation_accuracy": round(hit_rate([{"hit": r["citation_covered"]} for r in results]), 4),
@@ -48,6 +81,8 @@ def _metrics(results: list[dict]) -> dict:
         "avg_tokens": round(sum(r["total_tokens"] for r in results) / max(len(results), 1)),
         "passed": sum(1 for r in results if r["answer_nonempty"] and r["citation_covered"]),
     }
+    metrics.update(_latency(results))
+    return metrics
 
 
 def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
@@ -58,12 +93,15 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         ("cases", "{}", "{}", ""),
         ("answer_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("citation_accuracy", "{:.4f}", "{:.4f}", "{:+.4f}"),
+        ("p95_duration_ms", "{:.0f}", "{:.0f}", "{:+.0f}"),
         ("avg_tokens", "{:.0f}", "{:.0f}", "{:+.0f}"),
         ("total_cost_cny", "{:.4f}", "{:.4f}", "{:+.4f}"),
     ]
     for key, fa, fb, fd in rows:
-        base_v = ma[key]
-        new_v = mb[key]
+        base_v = ma.get(key)
+        new_v = mb.get(key)
+        if base_v is None or new_v is None:  # 旧报告可能没有该指标（如 p95）
+            continue
         diff = (new_v - base_v) if key != "cases" else 0
         print(f"  {key:<18} {fa.format(base_v)} -> {fb.format(new_v)}  {fd.format(diff)}")
 
@@ -180,10 +218,45 @@ async def _run_case(runtime, question: str, expected_source: str) -> dict:
     }
 
 
+def reanalyze() -> None:
+    """离线重算已有报告里的指标（不调 API、不需要 key）。
+
+    用途：给历史报告补齐"当初跑的时候还没有的指标"（例如 p50/p95 延迟）——
+    per-case 里已经存着 duration_ms/token/cost 明细，指标口径变了不必重花钱重跑。
+    会把补齐后的 metrics 写回同一份报告（per-case 原样保留）。
+    """
+    reports = sorted(REPORT_DIR.glob("*.json"))
+    if not reports:
+        print(f"[x] {REPORT_DIR} 下没有报告可分析。")
+        return
+    for path in reports:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        results = report.get("per_case") or []
+        if not results:
+            print(f"[skip] {path.name}：无 per_case")
+            continue
+        before = report.get("metrics") or {}
+        after = _metrics(results)
+        report["metrics"] = after
+        path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        changed = {k: v for k, v in after.items() if before.get(k) != v}
+        print(f"[ok] {path.name}  metrics 已重算，变化字段：{changed or '（无）'}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条（0=全量）")
     parser.add_argument("--tag", type=str, default=None, help="本次运行命名（写入 docs/eval-reports/{tag}.json）")
     parser.add_argument("--compare", type=str, default=None, help="与 docs/eval-reports/{tag}.json 的基线做回归 diff")
+    parser.add_argument(
+        "--reanalyze",
+        action="store_true",
+        help="只离线重算已有报告的指标（不调 API、不需要 key）",
+    )
     args = parser.parse_args()
-    asyncio.run(main(limit=args.limit, tag=args.tag, compare=args.compare))
+    if args.reanalyze:
+        reanalyze()
+    else:
+        asyncio.run(main(limit=args.limit, tag=args.tag, compare=args.compare))

@@ -1,16 +1,16 @@
 {
-  "tag": "baseline",
-  "created_at": "2026-09-07 18:55:24",
+  "tag": "fullrun-verify",
+  "created_at": "2026-09-13 22:23:39",
   "metrics": {
     "cases": 40,
     "answer_rate": 1.0,
     "citation_accuracy": 1.0,
-    "total_cost_cny": 0.2927,
-    "avg_tokens": 2845,
+    "total_cost_cny": 0.302,
+    "avg_tokens": 2947,
     "passed": 40,
-    "p50_duration_ms": 7420,
-    "p95_duration_ms": 12368,
-    "max_duration_ms": 13689
+    "p50_duration_ms": 7497,
+    "p95_duration_ms": 12975,
+    "max_duration_ms": 14196
   },
   "per_case": [
     {
@@ -19,9 +19,9 @@
       "citation_covered": true,
       "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 12575,
-      "cost_cny": 0.0083,
-      "total_tokens": 3034,
+      "duration_ms": 11767,
+      "cost_cny": 0.0078,
+      "total_tokens": 2950,
       "error": null
     },
     {
@@ -30,20 +30,20 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6613,
-      "cost_cny": 0.0067,
-      "total_tokens": 2646,
+      "duration_ms": 6387,
+      "cost_cny": 0.0063,
+      "total_tokens": 2580,
       "error": null
     },
     {
       "id": 3,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 2,
+      "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 11088,
-      "cost_cny": 0.0096,
-      "total_tokens": 3757,
+      "duration_ms": 7688,
+      "cost_cny": 0.008,
+      "total_tokens": 2695,
       "error": null
     },
     {
@@ -52,9 +52,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6000,
-      "cost_cny": 0.0071,
-      "total_tokens": 2874,
+      "duration_ms": 7142,
+      "cost_cny": 0.0065,
+      "total_tokens": 2672,
       "error": null
     },
     {
@@ -63,9 +63,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6676,
-      "cost_cny": 0.0074,
-      "total_tokens": 2807,
+      "duration_ms": 7122,
+      "cost_cny": 0.0065,
+      "total_tokens": 2420,
       "error": null
     },
     {
@@ -74,9 +74,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6890,
-      "cost_cny": 0.0076,
-      "total_tokens": 2879,
+      "duration_ms": 6463,
+      "cost_cny": 0.0067,
+      "total_tokens": 2747,
       "error": null
     },
     {
@@ -85,20 +85,20 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7062,
-      "cost_cny": 0.0074,
-      "total_tokens": 2849,
+      "duration_ms": 6221,
+      "cost_cny": 0.007,
+      "total_tokens": 2776,
       "error": null
     },
     {
       "id": 8,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 1,
+      "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 10994,
-      "cost_cny": 0.0077,
-      "total_tokens": 2895,
+      "duration_ms": 12659,
+      "cost_cny": 0.012,
+      "total_tokens": 4489,
       "error": null
     },
     {
@@ -107,20 +107,20 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7439,
-      "cost_cny": 0.0066,
-      "total_tokens": 2753,
+      "duration_ms": 6709,
+      "cost_cny": 0.0062,
+      "total_tokens": 2684,
       "error": null
     },
     {
       "id": 10,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 1,
+      "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 8040,
-      "cost_cny": 0.0073,
-      "total_tokens": 2755,
+      "duration_ms": 14196,
+      "cost_cny": 0.0114,
+      "total_tokens": 4219,
       "error": null
     },
     {
@@ -129,8 +129,8 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6962,
-      "cost_cny": 0.007,
+      "duration_ms": 7002,
+      "cost_cny": 0.0071,
       "total_tokens": 2773,
       "error": null
     },
@@ -140,9 +140,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7079,
-      "cost_cny": 0.0067,
-      "total_tokens": 2635,
+      "duration_ms": 6296,
+      "cost_cny": 0.0069,
+      "total_tokens": 2631,
       "error": null
     },
     {
@@ -151,9 +151,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7217,
-      "cost_cny": 0.0069,
-      "total_tokens": 2761,
+      "duration_ms": 7372,
+      "cost_cny": 0.0067,
+      "total_tokens": 2646,
       "error": null
     },
     {
@@ -162,9 +162,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6864,
-      "cost_cny": 0.0059,
-      "total_tokens": 2348,
+      "duration_ms": 7155,
+      "cost_cny": 0.0061,
+      "total_tokens": 2352,
       "error": null
     },
     {
@@ -173,20 +173,20 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7277,
-      "cost_cny": 0.0063,
-      "total_tokens": 2378,
+      "duration_ms": 6851,
+      "cost_cny": 0.0059,
+      "total_tokens": 2315,
       "error": null
     },
     {
       "id": 16,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 1,
+      "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 7613,
-      "cost_cny": 0.0062,
-      "total_tokens": 2407,
+      "duration_ms": 13294,
+      "cost_cny": 0.0104,
+      "total_tokens": 4225,
       "error": null
     },
     {
@@ -195,9 +195,9 @@
       "citation_covered": true,
       "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 12357,
-      "cost_cny": 0.0082,
-      "total_tokens": 3031,
+      "duration_ms": 11882,
+      "cost_cny": 0.0078,
+      "total_tokens": 2959,
       "error": null
     },
     {
@@ -206,9 +206,9 @@
       "citation_covered": true,
       "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 10818,
-      "cost_cny": 0.0074,
-      "total_tokens": 3004,
+      "duration_ms": 11687,
+      "cost_cny": 0.0078,
+      "total_tokens": 3030,
       "error": null
     },
     {
@@ -217,20 +217,20 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7196,
-      "cost_cny": 0.0068,
-      "total_tokens": 2781,
+      "duration_ms": 6948,
+      "cost_cny": 0.0067,
+      "total_tokens": 2746,
       "error": null
     },
     {
       "id": 20,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 1,
+      "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 7379,
-      "cost_cny": 0.007,
-      "total_tokens": 2814,
+      "duration_ms": 11582,
+      "cost_cny": 0.01,
+      "total_tokens": 4244,
       "error": null
     },
     {
@@ -239,9 +239,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 8004,
-      "cost_cny": 0.0075,
-      "total_tokens": 2872,
+      "duration_ms": 7390,
+      "cost_cny": 0.0076,
+      "total_tokens": 2870,
       "error": null
     },
     {
@@ -250,42 +250,42 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7728,
-      "cost_cny": 0.0072,
-      "total_tokens": 2845,
+      "duration_ms": 7025,
+      "cost_cny": 0.0071,
+      "total_tokens": 2815,
       "error": null
     },
     {
       "id": 23,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 1,
+      "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 7984,
-      "cost_cny": 0.0065,
-      "total_tokens": 2444,
+      "duration_ms": 12154,
+      "cost_cny": 0.0092,
+      "total_tokens": 3639,
       "error": null
     },
     {
       "id": 24,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 2,
+      "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 13689,
-      "cost_cny": 0.0106,
-      "total_tokens": 4042,
+      "duration_ms": 7651,
+      "cost_cny": 0.0081,
+      "total_tokens": 2652,
       "error": null
     },
     {
       "id": 25,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 1,
+      "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 7401,
-      "cost_cny": 0.0071,
-      "total_tokens": 2816,
+      "duration_ms": 12958,
+      "cost_cny": 0.0097,
+      "total_tokens": 3916,
       "error": null
     },
     {
@@ -294,9 +294,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6926,
+      "duration_ms": 7545,
       "cost_cny": 0.0066,
-      "total_tokens": 2759,
+      "total_tokens": 2727,
       "error": null
     },
     {
@@ -305,9 +305,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7871,
-      "cost_cny": 0.0081,
-      "total_tokens": 2946,
+      "duration_ms": 7464,
+      "cost_cny": 0.0074,
+      "total_tokens": 2839,
       "error": null
     },
     {
@@ -316,9 +316,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7130,
-      "cost_cny": 0.0069,
-      "total_tokens": 2765,
+      "duration_ms": 7537,
+      "cost_cny": 0.0061,
+      "total_tokens": 2443,
       "error": null
     },
     {
@@ -327,20 +327,20 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7263,
-      "cost_cny": 0.0069,
-      "total_tokens": 2794,
+      "duration_ms": 7530,
+      "cost_cny": 0.0066,
+      "total_tokens": 2730,
       "error": null
     },
     {
       "id": 30,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 1,
+      "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 7951,
-      "cost_cny": 0.0076,
-      "total_tokens": 2795,
+      "duration_ms": 12937,
+      "cost_cny": 0.011,
+      "total_tokens": 4239,
       "error": null
     },
     {
@@ -349,9 +349,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7789,
-      "cost_cny": 0.0079,
-      "total_tokens": 2984,
+      "duration_ms": 7932,
+      "cost_cny": 0.0069,
+      "total_tokens": 2741,
       "error": null
     },
     {
@@ -360,20 +360,20 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7309,
-      "cost_cny": 0.0065,
-      "total_tokens": 2510,
+      "duration_ms": 7249,
+      "cost_cny": 0.0068,
+      "total_tokens": 2816,
       "error": null
     },
     {
       "id": 33,
       "answer_nonempty": true,
       "citation_covered": true,
-      "tool_calls": 2,
+      "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 12228,
-      "cost_cny": 0.0101,
-      "total_tokens": 4087,
+      "duration_ms": 7300,
+      "cost_cny": 0.0065,
+      "total_tokens": 2423,
       "error": null
     },
     {
@@ -382,9 +382,9 @@
       "citation_covered": true,
       "tool_calls": 2,
       "llm_calls": 2,
-      "duration_ms": 10820,
-      "cost_cny": 0.0085,
-      "total_tokens": 3724,
+      "duration_ms": 11716,
+      "cost_cny": 0.008,
+      "total_tokens": 3364,
       "error": null
     },
     {
@@ -393,9 +393,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6919,
-      "cost_cny": 0.0061,
-      "total_tokens": 2380,
+      "duration_ms": 7759,
+      "cost_cny": 0.007,
+      "total_tokens": 2858,
       "error": null
     },
     {
@@ -404,9 +404,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 6942,
-      "cost_cny": 0.0063,
-      "total_tokens": 2580,
+      "duration_ms": 7274,
+      "cost_cny": 0.0059,
+      "total_tokens": 2507,
       "error": null
     },
     {
@@ -415,9 +415,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 8015,
-      "cost_cny": 0.0074,
-      "total_tokens": 2541,
+      "duration_ms": 8231,
+      "cost_cny": 0.0073,
+      "total_tokens": 2522,
       "error": null
     },
     {
@@ -426,9 +426,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 8212,
-      "cost_cny": 0.0068,
-      "total_tokens": 2464,
+      "duration_ms": 7208,
+      "cost_cny": 0.006,
+      "total_tokens": 2347,
       "error": null
     },
     {
@@ -437,9 +437,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7865,
-      "cost_cny": 0.0069,
-      "total_tokens": 2477,
+      "duration_ms": 7993,
+      "cost_cny": 0.0077,
+      "total_tokens": 2571,
       "error": null
     },
     {
@@ -448,9 +448,9 @@
       "citation_covered": true,
       "tool_calls": 1,
       "llm_calls": 2,
-      "duration_ms": 7246,
-      "cost_cny": 0.0071,
-      "total_tokens": 2793,
+      "duration_ms": 7087,
+      "cost_cny": 0.0067,
+      "total_tokens": 2716,
       "error": null
     }
   ]
