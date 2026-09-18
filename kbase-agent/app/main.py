@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.api.chat import router as chat_router
@@ -27,13 +26,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="kbase-agent", version="0.1.0", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# 刻意不加 CORSMiddleware：演示前端由本服务在 / 同源提供，同源请求不需要 CORS；
+# 而本服务**没有任何鉴权**，一旦开 `allow_origins=["*"]`，任意网站都能从用户浏览器里
+# 跨域读走 /api/sessions/{id}/messages 与 /api/runs（历史对话与运行 trace）。
+# 真要开放给别的源，应该同时补鉴权，并把 allow_origins 收敛到具体域名。
 app.include_router(chat_router, prefix="/api")
 
 

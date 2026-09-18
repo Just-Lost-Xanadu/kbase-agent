@@ -29,29 +29,30 @@ class ChatResponse(BaseModel):
     sources: list[str] = Field(default_factory=list, description="引用来源")
 
 
+def _question_of(req: ChatRequest) -> str:
+    """取本轮用户问题 = 最后一条 user 消息。
+
+    同一段逻辑原先在 _record_turn 里重复了一份，现统一走这里，避免两处口径漂移。
+    """
+    return next(
+        (m.content for m in reversed(req.messages) if m.role in {"user", "human"}),
+        "",
+    )
+
+
 async def _record_turn(req: ChatRequest, answer: str, sources: list[str]) -> None:
     """把一轮对话写入会话记录表（仅显式带 session_id 的请求；供读历史接口用）。"""
     if not req.session_id:
         return
     from app import store
 
-    last_user = next(
-        (m.content for m in reversed(req.messages) if m.role in {"user", "human"}),
-        "",
-    )
+    last_user = _question_of(req)
     await store.save_turn(
         req.session_id,
         title=(last_user or "新会话")[:40],
         user_content=last_user,
         answer=answer,
         sources=sources,
-    )
-
-
-def _question_of(req: ChatRequest) -> str:
-    return next(
-        (m.content for m in reversed(req.messages) if m.role in {"user", "human"}),
-        "",
     )
 
 
@@ -142,9 +143,10 @@ async def chat_stream(req: ChatRequest, request: Request):
             ):
                 if "answer" in update:  # 收尾事件
                     # 先置位再写入：若这次写入途中被取消，finally 里不能再补一次，
-                    # 否则同一次运行会落两条 trace（后一条答案为空）
+                    # 否则同一次运行会落两条 trace（后一条答案为空）。
+                    # shield 与同步端点同理：答案已产出，此刻客户端断开也不能丢掉这次 trace。
                     persisted = True
-                    await _persist(req, rec, update)
+                    await asyncio.shield(_persist(req, rec, update))
                     yield {"event": "done", "data": json.dumps(update, ensure_ascii=False)}
                     continue
                 for node, payload in update.items():
@@ -166,8 +168,11 @@ async def chat_stream(req: ChatRequest, request: Request):
                     yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
         except Exception as exc:  # noqa: BLE001
             rec.error = str(exc)[:300]
-            await _persist(req, rec, None)
+            # 与成功分支同样"先置位再写"：若这次写入途中被取消（CancelledError 属 BaseException，
+            # 不会被上面的 except 捕获），finally 里 `not persisted` 会再排一个后台 _persist，
+            # 于是同一次运行落两条 trace（后一条答案为空）。shield 则保证写入本身不被取消打断。
             persisted = True
+            await asyncio.shield(_persist(req, rec, None))
             yield {
                 "event": "error",
                 "data": json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False),

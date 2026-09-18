@@ -61,8 +61,10 @@ class Recorder:
         return {
             "question": self.question,
             "duration_ms": int((time.time() - self.started_at) * 1000),
-            "llm_calls": sum(1 for s in self.steps if s.name == "llm"),
-            "tool_calls": sum(1 for s in self.steps if s.name != "llm"),
+            # 按 node 区分而不是按 name：agent 节点记 name="llm"、tools 节点记具体工具名，
+            # 用 name 判断等于"假设没有工具叫 llm"，将来加一个同名工具就会数错。
+            "llm_calls": sum(1 for s in self.steps if s.node == "agent"),
+            "tool_calls": sum(1 for s in self.steps if s.node == "tools"),
             "prompt_tokens": total_in,
             "completion_tokens": total_out,
             "total_tokens": total_in + total_out,

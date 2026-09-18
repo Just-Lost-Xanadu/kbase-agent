@@ -38,6 +38,26 @@ class VectorStore:
                 metadata={"hnsw:space": "cosine"},
             )
 
+    def reset(self) -> None:
+        """删掉整个 collection（全量重建索引前调用）。
+
+        为什么必须有：chunk_id 是 `source#method#idx`，**带了 method 但不带 chunk_size/overlap**。
+        于是两种常见改动会留下覆盖不到的旧向量：
+          1. 换切分法（recursive → fixed）：id 前缀不同，upsert 覆盖不到 → 新旧切片长期共存；
+          2. 同名文档被替换成更短的版本：新 idx 数量变少 → 尾部旧切片残留。
+        后果不只是"多占空间"：向量路会召回旧切片，而 BM25 的 sidecar（chunks.jsonl）是整份
+        覆盖写的、只有新切片 —— **两路检索口径不一致，RRF 融合的是两个不同的候选池**，
+        用 `recursive`/`fixed` 做对比实验得到的结论直接失效。
+        （已实测：先 recursive 再 fixed，向量库 23 条而 sidecar 13 条，库内 method 分布为
+        {'recursive': 10, 'fixed': 13}。）
+        """
+        try:
+            self.client.delete_collection(name=settings.collection_name)
+        except Exception:  # noqa: BLE001
+            # collection 不存在时 delete 会报错——"没东西可删"就是我们要的结果，忽略
+            pass
+        self._collection = None
+
     def count(self) -> int:
         try:
             self._ensure_collection()

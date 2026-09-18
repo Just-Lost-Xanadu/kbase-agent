@@ -193,12 +193,14 @@ flowchart TD
 
 ## 已知取舍 / 改进方向
 
+- **刻意不加 CORS 中间件**：演示前端由本服务在 `/` 同源提供，同源请求不需要 CORS；而本服务**没有任何鉴权**，一旦开 `allow_origins=["*"]`，任意网站都能从用户浏览器跨域读走 `/api/sessions/{id}/messages` 与 `/api/runs`（历史对话与运行 trace）。要开放给别的源，必须同时补鉴权并把来源收敛到具体域名。
 - 开发用 Chroma，生产切 Milvus / Elasticsearch（换 collection 层即可）。
 - 默认 FastEmbed（ONNX，零 torch）；要更准可 `EMBED_BACKEND=flagembedding` 上 bge-m3，或 `RERANK_ENABLED=true` 加重排——均需 `pip install -e ".[embed]"`。**换 embedding 后删除 `data/chroma/` 重建索引**。
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
 - **防死循环是三道，不在同一层**（别和"上下文层护栏"混成一类讲）：① prompt 第 6 条 `max_steps`（提示层，让模型自己收敛）② `MAX_RECURSION` / `recursion_limit`（框架层，模型不听话时由框架掐停）③ 重复工具调用判重（逻辑层）。另有两道**不属于防死循环**的护栏：工具输出截断（防上下文爆炸）与单步超时（防单次调用卡死）。
-- 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**替换已有同名文档后请删 `data/chroma/` 重建索引**（增量新增文件可直接 `python scripts/index_docs.py`）。
+- 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**`scripts/index_docs.py` 是全量重建**：每次都会重新解析全部文档、**先清空 collection 再写入**，所以替换文档、增删文档、甚至换切分法都直接重跑它即可，不需要手工删 `data/chroma/`。
+  （为什么必须先清空：`chunk_id = source#method#idx` 带 method 但**不带 chunk_size/overlap**，换切分法时旧 id 覆盖不到会永久残留 → 向量路召回旧切片、而 BM25 的 sidecar 只有新切片，两路口径不一致。这是实测复现过的缺陷，已有回归测试锁住“先 reset 再 add”的顺序。换 embedding 模型仍需重建，理由同前。）
 - 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户区分与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。
 - **个人数据工具没有鉴权（安全边界，如实说明）**：`query_business_db` 的身份来自"问题文本里出现的姓名"，而不是会话绑定的用户——任何人都可以问别人（例如"李四还剩几天年假"）而拿到其年假余额与报销金额。已修的是**静默错人**：姓名缺失时不再默认返回第一条记录（旧实现会拿张三的数据当提问人的），姓名有歧义时直接拒绝。
   配合 `SYSTEM_PROMPT` 第 5 条，未指名员工时仍会**先 `retrieve_knowledge` 取制度规则并据此说明、再请用户补充姓名**——实测问「我今年还剩几天年假？」，回答会先给出年假与结转规则（带【来源】引用），再说明"需要你的姓名才能查个人剩余天数"，**既没有丢掉该答的制度部分，也不会静默用他人数据**。
@@ -211,6 +213,6 @@ flowchart TD
 ## 常见坑
 
 - **Anaconda 下 onnxruntime 报 `DLL load failed`**：是 Anaconda 自带旧版 VC 运行库（vcruntime140/msvcp140≈14.29）盖过了系统新版。执行 `conda update -n base -c conda-forge -y vs2015_runtime` 一次即可（torch/bge 同理会遇到）。
-- 首次跑 `scripts/index_docs.py` 会从 HuggingFace 下载 embedding 模型（几十 MB）；换模型后务必删 `data/chroma/`。
+- 首次跑 `scripts/index_docs.py` 会从 HuggingFace 下载 embedding 模型（几十 MB）；**换 embedding 模型后必须重建索引**（重跑 `index_docs.py` 即可，它会先清空 collection）。
 - 每个 MCP 工具调用都会新起一个 stdio 子进程（真 MCP 的代价）；演示规模无所谓，要提速可把 `app/mcp/servers.py` 改成进程内直连。**这是当前 p95 延迟的主要来源**（`--compare` 两次跑的 p95 就差了 ~600ms，抖动也来自子进程启动与 LLM 往返）。
 

@@ -48,8 +48,12 @@ def split_documents(
       - method  : 用 fixed 还是 recursive 切（默认 recursive）
       - chunk_id: f"{source}#{method}#{idx}" —— 唯一、稳定。它在 vector_store 层用作 Chroma 的 id
                   （配合 upsert 幂等覆盖），也在 hybrid 合并两侧命中时按它去重相加 RRF 分。
-    一个 chunk_id 恒有名 => 重建/增量只会覆盖同名旧 chunk，不会造成 id 冲突（这与"换 embedding
-    后必须删库重建"不同：换模型会改变语义但 chunk_id 不变，因此必须整库重建，见 README 坑位）。
+     **chunk_id 里带 method、但不带 chunk_size/overlap**，所以"重建会不会残留旧向量"分两种情况：
+      - 只改 chunk_size/overlap（method 不变）：idx 沿用到新分块数为止，同名 id 被 upsert 覆盖，
+        但**若新文档更短、分块数变少，尾部的旧 id 会残留**；
+      - 换了 method（recursive ↔ fixed）：id 前缀不同，旧的一批**完全覆盖不到**，全部残留。
+     因此 `RetrievalPipeline.index()` 走的是"先清空 collection 再全量写入"，不要依赖 upsert 去兜底。
+     另：换 embedding 模型时 chunk_id 不变、但向量语义变了，同样必须整库重建（见 README 坑位）。
     """
     chunkers = {
         "fixed": fixed_size_chunk,

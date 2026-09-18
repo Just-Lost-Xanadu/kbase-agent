@@ -182,3 +182,42 @@ def test_keyword_coverage_ignores_whitespace_and_misses():
     # 空答案 / 无关键词：都不得抛异常
     assert keyword_coverage("", ["结转"])[0] == 0.0
     assert keyword_coverage("任意答案", [])[0] == 0.0
+
+
+# —— 索引重建：不能残留旧 chunk ——
+# 背景（已实测复现）：chunk_id 是 `source#method#idx`，带 method 但不带 chunk_size/overlap。
+# 于是换切分法时旧 id 覆盖不到 → 向量库残留旧切片，而 BM25 的 sidecar 是整份覆盖写的、
+# 只有新切片，两路口径不一致（实测 recursive→fixed 后库内 23 条 vs sidecar 13 条）。
+# 这条测试锁住"index() 先 reset 再 add"的调用顺序。
+
+
+def test_index_resets_vector_store_before_adding(tmp_path, monkeypatch):
+    from app.config import settings
+    from app.retrieval.pipeline import RetrievalPipeline
+
+    # sidecar 会写到 settings.chroma_path 下，必须指到临时目录，别污染真实索引
+    monkeypatch.setattr(settings, "chroma_path", str(tmp_path / "chroma"), raising=False)
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "d.md").write_text("制度正文。" * 60, encoding="utf-8")
+
+    calls: list[str] = []
+
+    class FakeStore:
+        def reset(self) -> None:
+            calls.append("reset")
+
+        def add(self, chunks) -> None:
+            calls.append(f"add:{len(chunks)}")
+
+        def count(self) -> int:
+            return 0
+
+    pipeline = RetrievalPipeline(embedder=object(), vector_store=FakeStore())
+    pipeline.index(str(docs), method="fixed")
+
+    assert calls, "index() 应当调用 vector_store"
+    assert calls[0] == "reset", f"reset 必须先于 add 执行，实际顺序={calls}"
+    assert calls[1].startswith("add:"), f"add 应紧随 reset，实际顺序={calls}"
+    assert int(calls[1].split(":")[1]) > 0

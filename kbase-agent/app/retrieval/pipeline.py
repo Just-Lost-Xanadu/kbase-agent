@@ -63,9 +63,17 @@ class RetrievalPipeline:
         )
 
     def index(self, source_dir: str | Path | None = None, method: str = "recursive") -> None:
+        """全量重建索引。
+
+        注意这里是**全量**语义：每次都把 source_dir 下所有文档重新解析、切分、入库，
+        因此必须先清空 collection——否则换切分法（chunk_id 前缀变了）或同名文档变短
+        （idx 数量变少）时，旧向量覆盖不到、会永久残留，导致"向量路召回旧切片、
+        BM25 只有新切片"的两路口径不一致（详见 VectorStore.reset 的说明）。
+        """
         source_dir = source_dir or DEFAULT_DOCS_DIR
         documents = load_documents(source_dir)
         chunks = split_documents(documents, methods=(method,))
+        self.vector_store.reset()
         self.vector_store.add(chunks)
         sidecar = self._sidecar_path()
         sidecar.parent.mkdir(parents=True, exist_ok=True)
