@@ -2,6 +2,13 @@
 
 **企业知识库 + 工具调用 Agent（单 Agent）**：基于 LangGraph 的 ReAct 式工具循环，RAG 检索与业务工具经 **MCP 协议真接入**（stdio）；配**两层评测 Harness**（40 条金标：检索层 + 端到端回归）、SQLite 会话持久化、trace/成本可观测与护栏。求职学习项目的旗舰作品。
 
+> **与姊妹项目 `mcp-tools` 的关系**（两仓库是**一个系统的两层**，不是两个重复 demo）：
+> 本仓库是**编排层**——Agent 怎么决策、怎么检索、怎么管状态、怎么评测；
+> `mcp-tools` 是**协议层**——把工具按 MCP 标准做成"可被任何客户端消费"的 Server（安全边界在其内部）。
+> 本项目的工具用 FastMCP 写在 `app/mcp/servers.py`，走真 stdio 子进程；`mcp-tools` 则刻意换成
+> 数据/文件域、并只保留 stdio，用来独立验证"工具与 Agent 解耦、跨客户端复用"这件事本身。
+> 面试口径：**编排与协议分层**，不是"做了两个知识库问答"。
+
 ## 目录结构
 
 ```
@@ -27,13 +34,18 @@ app/
     servers.py         # FastMCP：retrieve_knowledge / query_business_db（HR 个人数据）
   guardrails.py        # 轮次/超时/工具输出截断/重复调用检测
   data/
-    docs/                # 知识库语料：6 篇 md + docx/xlsx/pdf 样例，统一分块入库（_ 前缀忽略）
+    docs/                # 知识库语料：9 篇（6 篇 md + docx/xlsx/pdf 各 1），统一分块入库（_ 前缀忽略）
     business/            # 业务系统个人数据（首次调用自动生成示例）
     checkpoints.sqlite   # 会话 checkpoint + 消息记录（自动生成；.gitignore 已忽略 *.sqlite）
 eval/                  # 40 条评测集 + 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测
+tests/                 # smoke + 纯逻辑单测（19 项）
+start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
+requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
+docs/
+  eval-reports/        # 评测报告（baseline.json 基线 + fullrun-verify.json 复核，可被 --compare 引用）
+  screenshots/         # 演示截图
 ```
 
 ## 快速开始
@@ -47,19 +59,28 @@ tests/                 # smoke + 纯逻辑单测
 cd kbase-agent
 python -m venv .venv
 .venv\Scripts\activate          # Windows；macOS/Linux 用 source .venv/bin/activate
+pip install -r requirements.lock   # 可选但推荐：复现已验证的依赖组合（Python 3.12）
 pip install -e ".[dev]"         # 默认零 torch；重排/bge-m3 才需要 .[embed]
 copy .env.example .env          # 填入 DEEPSEEK_API_KEY
 uvicorn app.main:app --reload   # http://127.0.0.1:8000/docs
 ```
 
+> **依赖为什么要锁**：上游 `langgraph` / `langchain-core` / `chromadb` 大版本变动快，本仓库实测可跑的
+> 组合是 **langgraph 1.2.x + langchain-core 1.6.x + chromadb 1.5.x**（见 `requirements.lock` 头部）。
+> 只跑 `pip install -e .` 可能装到不兼容的新版本——先装 lock、再装本包，是最稳的顺序。
+
 ## 使用
 
 ```bash
 python scripts/index_docs.py                     # 建索引（首次会下载 ~几十MB ONNX embedding）
-python scripts/eval.py                           # 跑 40 条评测（命中率/引用准确率）
+python scripts/eval.py                           # 跑 40 条评测（命中率/引用准确率，离线零成本）
+python scripts/eval_e2e.py --reanalyze           # 只重算已有报告的指标（含 p50/p95），不调 API
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
 python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判回答/引用/成本）
 ```
+
+> 前三条（建索引、检索层评测、报告重算）**不需要 API key**；只有 Agent 对话与端到端评测需要。
+> `--reanalyze` 是纯离线分析：per-case 里已存着 duration_ms/token/cost 明细，指标口径变化不必重花钱重跑。
 
 网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖）。页面走 **SSE 节点级流式（`/api/chat/stream`）**，提问后可见 Agent 逐步工具调用（检索→查库）与最终回答。左侧会话栏可**新建 / 回看 / 切换历史会话**：消息与 checkpoint 落 `data/checkpoints.sqlite`，刷新页面甚至重启服务后仍能恢复并继续对话。
 
@@ -82,11 +103,20 @@ API：
 
 ## 效果度量（简历口径）
 
-`eval/questions.jsonl` 每条含 `expected_source`：
+`eval/questions.jsonl` 每条含 `expected_source`（40 条、id 1~40 不重复；真值来源全部是 `data/docs/` 里实际存在的 9 篇文件名）：
 - `scripts/eval.py`（检索层，离线零成本）：`topk_hit_rate` 是否命中正确来源。同一脚本里的 `citation_accuracy` 与它是同一个判定（都看 top-k 来源里有没有真值文件），两个数字不会不同——别当成两个指标讲。
-- `scripts/eval_e2e.py`（端到端，真实调 Agent API）：统计回答率（**只判非空**）、引用覆盖（真值来源是否出现在**本轮工具返回的 sources** 里，不判答案文本里有没有引用）、耗时与成本——用于 prompt/模型/工具改动后的回归把关。
+- `scripts/eval_e2e.py`（端到端，真实调 Agent API）：统计回答率（**只判非空**）、引用覆盖（真值来源是否出现在**本轮工具返回的 sources** 里，不判答案文本里有没有引用）、耗时与成本——用于 prompt/模型/工具改动后的回归把关。指标含 `p50_duration_ms` / `p95_duration_ms`（线性插值分位数，口径与 numpy 默认一致），是"单次问答端到端耗时"，**含 MCP 子进程启动 + 检索 + LLM 往返**。
 
 40 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
+
+**两份入库报告的实测数字**（`docs/eval-reports/`，同口径可复算）：
+
+| 报告 | tag / 时间 | answer_rate | citation_accuracy | p50 延迟 | p95 延迟 | 总成本 |
+|---|---|---|---|---|---|---|
+| `baseline.json` | baseline / 2026-09-07 | 40/40 = 1.0 | 40/40 = 1.0 | 7420 ms | 12368 ms | ¥0.2927 |
+| `fullrun-verify.json` | fullrun-verify / 2026-09-13 | 40/40 = 1.0 | 40/40 = 1.0 | 7497 ms | 12975 ms | ¥0.3020 |
+
+**这两组数字要会自己解释**（否则会被追问穿）：两次 `citation_accuracy` 都是 1.0、`--compare` 报"无逐条变化"，说明**该集合当前没有区分度**——它的价值是"防劣化的回归基线"，不是"效果有多好"的证明。延迟 p50 ≈ 7.4s / p95 ≈ 12.5s，且两次跑之间 p95 就有 ~600ms 抖动，**主要成本是每条都新起 stdio 子进程 + 真实 LLM 往返**，这也是本项目最该优化的工程点（见「已知取舍」）。
 
 **口径边界（别被追问才想起来）**：40 条都是**单轮**提问（每条走新 thread，不共享上下文），所以**多轮行为不在评测覆盖内**。同一 session 续聊时历史会累积，模型可能直接基于上下文作答而**不再调工具**，该轮 `sources` 因此为空——引用只统计**本轮**工具返回，历史轮次的来源不会带过来（`data/business` 个人数据工具输出也不含【来源：】标记，本来就不贡献 sources）。
 
@@ -112,6 +142,7 @@ flowchart TD
 - **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。
 - **RAG**：混合检索（向量 + BM25 做 RRF）去抖 + 可选重排 + 引用溯源 + 评测集验证，坏例能说清怎么调好的。
 - **工程化**：SSE 节点级流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
+- **效果与成本**：40 条金标两层 Harness（`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；延迟 p50 ≈ 7.4s / p95 ≈ 12.5s、单条成本 ≈ ¥0.0075，`/api/runs` 有节点级 trace 可逐条归因（**延迟大头是每条新起 MCP stdio 子进程 + LLM 往返**，不是检索）。
 
 ## 对标 JD 主要能力（面试话术）
 
@@ -139,5 +170,5 @@ flowchart TD
 
 - **Anaconda 下 onnxruntime 报 `DLL load failed`**：是 Anaconda 自带旧版 VC 运行库（vcruntime140/msvcp140≈14.29）盖过了系统新版。执行 `conda update -n base -c conda-forge -y vs2015_runtime` 一次即可（torch/bge 同理会遇到）。
 - 首次跑 `scripts/index_docs.py` 会从 HuggingFace 下载 embedding 模型（几十 MB）；换模型后务必删 `data/chroma/`。
-- 每个 MCP 工具调用都会新起一个 stdio 子进程（真 MCP 的代价）；演示规模无所谓，要提速可把 `app/mcp/servers.py` 改成进程内直连。
+- 每个 MCP 工具调用都会新起一个 stdio 子进程（真 MCP 的代价）；演示规模无所谓，要提速可把 `app/mcp/servers.py` 改成进程内直连。**这是当前 p95 延迟的主要来源**（`--compare` 两次跑的 p95 就差了 ~600ms，抖动也来自子进程启动与 LLM 往返）。
 

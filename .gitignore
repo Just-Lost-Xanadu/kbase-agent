@@ -24,6 +24,11 @@ venv/
 *-wal
 *-shm
 
+# 评测报告默认不入库：只保留被显式选为"基线/回归证据"的报告
+# （当前入库的 baseline.json / fullrun-verify.json 是手动 git add 进来的，
+#   日后新增的报告会被这条规则挡在仓库外，避免 docs/eval-reports/ 无限膨胀）
+kbase-agent/docs/eval-reports/*.json
+
 # IDE
 .idea/
 .vscode/
