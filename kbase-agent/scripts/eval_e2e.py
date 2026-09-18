@@ -162,7 +162,9 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         print("\n  [!] 答案关键词覆盖率下降（citation 抓不到的劣化）：")
         for r, b_cov, n_cov in kw_regressed:
             print(f"    #{r['id']}  {b_cov:.2f} -> {n_cov:.2f}  未覆盖={r.get('keyword_missed')}")
-    elif any(r.get("keyword_coverage") is not None for r in b["per_case"]):
+    elif any(r.get("keyword_coverage") is not None for r in a["per_case"]):
+        # 只有基线本身也有关键词数据时，"无下降"才是有意义的结论；
+        # 否则基线是旧口径报告，这里应当保持沉默而不是给出虚假的安心结论。
         print("  （关键词覆盖率无下降）")
 
 
@@ -293,13 +295,20 @@ def reanalyze() -> None:
             continue
         # 先按"已存的 answer + 当前金标关键词"重算关键词覆盖率。
         # 旧报告没存 answer，这一步会整段跳过（于是那些报告不会凭空多出覆盖率指标）。
+        # 金标关键词以 eval/questions.jsonl 为唯一事实来源：per_case 里存的那份是
+        # "当时跑用的口径"，改了口径必须能被覆盖——否则"改关键词后跑 --reanalyze 即可刷新"
+        # 这句话就是假的（第一版实现就踩了这个坑：只读报告里的旧关键词，重算结果纹丝不动）。
+        gold = {c["id"]: (c.get("expected_keywords") or []) for c in _load_cases()}
         recomputed = 0
         for r in results:
             answer = r.get("answer")
-            kws = r.get("expected_keywords")
-            if answer is None or not kws:
+            if answer is None:
+                continue   # 旧报告没存答案原文，无法离线重算
+            kws = gold.get(r["id"]) or r.get("expected_keywords") or []
+            if not kws:
                 continue
             cov, missed = keyword_coverage(answer, kws)
+            r["expected_keywords"] = kws
             r["keyword_coverage"] = round(cov, 4)
             r["keyword_missed"] = missed
             recomputed += 1
