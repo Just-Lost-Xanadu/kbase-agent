@@ -85,19 +85,35 @@ def retrieve_knowledge(question: str) -> str:
 @mcp.tool()
 def query_business_db(question: str) -> str:
     """查内部业务系统拿员工的个人状态数据：年假剩余天数、加班调休余额、最新报销单状态。
-    只回答"个人数据"，不含制度规则（制度请调 retrieve_knowledge）。问题里提到员工姓名时按姓名查，否则按默认用户。"""
+    只回答"个人数据"，不含制度规则（制度请调 retrieve_knowledge）。
+    必须在问题里明确员工姓名；姓名缺失或有歧义时本工具会拒绝并说明原因，不会猜测默认员工。"""
     _ensure_records_file()
     records = [
         json.loads(line)
         for line in RECORDS_FILE.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    matched = next(
-        (r for r in records if r["name"] in question),
-        records[0] if records else None,
-    )
-    if matched is None:
-        return "业务系统中暂无该员工记录。"
+    if not records:
+        return "业务系统中暂无员工记录。"
+
+    # 身份解析：只认"问题里出现的员工姓名"，且要求唯一。
+    # 早期实现用 records[0] 兜底"没写姓名"的情况，会把张三的年假/报销金额当成提问人的数据返回
+    # （静默错人）；多姓名时也只取列表里第一个命中，同样是静默错人。两者都改为显式拒绝。
+    # 另注（演示边界）：本工具**没有鉴权**——它是把"问题文本"当身份来源，而非绑定会话用户，
+    # 因此无法阻止用户询问他人数据。生产化应改为由会话层注入 user_id 并做行级过滤，
+    # 该限制已在 README「已知取舍」如实写明，不对外宣称具备权限控制。
+    matched_names = [r["name"] for r in records if r.get("name") and r["name"] in question]
+    if not matched_names:
+        return (
+            "无法确定员工身份：请在问题中明确员工姓名（例如“张三还剩几天年假”）。"
+            "为避免返回他人数据，本工具不会猜测默认员工。"
+        )
+    if len(matched_names) > 1:
+        return (
+            f"问题中出现了多个员工姓名（{'、'.join(matched_names)}），身份不唯一，"
+            "请一次只询问一位员工。"
+        )
+    matched = next(r for r in records if r["name"] == matched_names[0])
     return json.dumps(
         {
             "employee": matched["name"],

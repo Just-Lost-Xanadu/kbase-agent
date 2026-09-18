@@ -2,8 +2,13 @@
 
 分层说明（与 scripts/eval.py 的区别）：
 - eval.py        ：检索层 Harness（离线、零成本、快），测 top-k 是否命中真值来源。
-- eval_e2e.py    ：Agent 层 Harness（真实调 DeepSeek），测"回答可用 + 引用覆盖真值来源"，
-                   并统计耗时/token/成本。是 prompt/模型/工具改动后防劣化的回归手段。
+- eval_e2e.py    ：Agent 层 Harness（真实调 DeepSeek），四个维度：
+                   ① answer_rate      —— 回答非空（最弱口径，只保证"没哑火"）
+                   ② citation_accuracy—— 真值来源出现在本轮工具返回的 sources 里
+                   ③ answer_keyword_coverage / keyword_full_hit_rate
+                                      —— **答案内容质量**：金标关键词覆盖率（纯字符串匹配、零 LLM 成本）
+                   ④ p50/p95 延迟、token、成本
+                   是 prompt/模型/工具改动后防劣化的回归手段。
 
 用法：
     python scripts/eval_e2e.py --tag baseline              # 全量 40 条，记为 baseline
@@ -11,7 +16,8 @@
     python scripts/eval_e2e.py --tag v2-prompt --compare baseline   # 打印与基线的回归 diff
     python scripts/eval_e2e.py --limit 5                   # 冒烟（不落报告）
     python scripts/eval_e2e.py --reanalyze                 # 只重算已有报告的指标（不调 API、不要 key）
-报告产物：docs/eval-reports/{tag}.json（含 per-case，可被 --compare 引用）
+                                                           # 改了 questions.jsonl 的金标关键词后跑它即可刷新覆盖率
+报告产物：docs/eval-reports/{tag}.json（含 per-case 与 answer 原文，可被 --compare 引用）
 """
 
 import argparse
@@ -29,7 +35,7 @@ try:
 except AttributeError:  # Python < 3.7
     pass
 
-from eval.metrics import hit_rate  # noqa: E402
+from eval.metrics import hit_rate, keyword_coverage  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_FILE = ROOT / "eval" / "questions.jsonl"
@@ -81,6 +87,15 @@ def _metrics(results: list[dict]) -> dict:
         "avg_tokens": round(sum(r["total_tokens"] for r in results) / max(len(results), 1)),
         "passed": sum(1 for r in results if r["answer_nonempty"] and r["citation_covered"]),
     }
+    # 答案内容质量维度（2026-09 新增）：金标关键词覆盖率。
+    # 只在 per_case 里真的有该字段时输出——旧报告没有存 answer，--reanalyze 会自然跳过，
+    # 于是 --compare 也不会拿"有"和"没有"去比，避免误报。
+    coverages = [r["keyword_coverage"] for r in results if r.get("keyword_coverage") is not None]
+    if coverages:
+        metrics["answer_keyword_coverage"] = round(sum(coverages) / len(coverages), 4)
+        metrics["keyword_full_hit_rate"] = round(
+            sum(1 for c in coverages if c >= 1.0) / len(coverages), 4
+        )
     metrics.update(_latency(results))
     return metrics
 
@@ -93,6 +108,8 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         ("cases", "{}", "{}", ""),
         ("answer_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("citation_accuracy", "{:.4f}", "{:.4f}", "{:+.4f}"),
+        ("answer_keyword_coverage", "{:.4f}", "{:.4f}", "{:+.4f}"),
+        ("keyword_full_hit_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("p95_duration_ms", "{:.0f}", "{:.0f}", "{:+.0f}"),
         ("avg_tokens", "{:.0f}", "{:.0f}", "{:+.0f}"),
         ("total_cost_cny", "{:.4f}", "{:.4f}", "{:+.4f}"),
@@ -128,6 +145,26 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
     if not regressed and not recovered:
         print("  （无逐条变化）")
 
+    # 关键词覆盖率劣化：能抓到 citation 抓不到的那类劣化
+    # （来源引用对了，但答案内容缺了关键事实——例如模型变啰嗦却没说出"3 个月"）。
+    kw_regressed = []
+    for r in b["per_case"]:
+        base_r = base_by_id.get(r["id"])
+        if not base_r:
+            continue
+        b_cov = base_r.get("keyword_coverage")
+        n_cov = r.get("keyword_coverage")
+        if b_cov is None or n_cov is None:
+            continue
+        if n_cov < b_cov:
+            kw_regressed.append((r, b_cov, n_cov))
+    if kw_regressed:
+        print("\n  [!] 答案关键词覆盖率下降（citation 抓不到的劣化）：")
+        for r, b_cov, n_cov in kw_regressed:
+            print(f"    #{r['id']}  {b_cov:.2f} -> {n_cov:.2f}  未覆盖={r.get('keyword_missed')}")
+    elif any(r.get("keyword_coverage") is not None for r in b["per_case"]):
+        print("  （关键词覆盖率无下降）")
+
 
 async def main(limit: int, tag: str | None, compare: str | None) -> None:
     from app.agent.graph import create_runtime
@@ -140,14 +177,15 @@ async def main(limit: int, tag: str | None, compare: str | None) -> None:
     results = []
     try:
         for idx, case in enumerate(cases, start=1):
-            r = await _run_case(runtime, case["question"], case["expected_source"])
+            r = await _run_case(runtime, case)
             r["id"] = case["id"]
             results.append(r)
             mark = "OK" if r["citation_covered"] and r["answer_nonempty"] else "FAIL"
             print(
                 f"[{idx}/{len(cases)}] #{case['id']} {mark} "
                 f"tools={r['tool_calls']} cost=¥{r['cost_cny']:.4f} "
-                f"tok={r['total_tokens']} {r['error'] or ''}"
+                f"tok={r['total_tokens']} kw={r['keyword_coverage']:.2f} "
+                f"{r['error'] or ''}"
             )
     finally:
         await runtime.aclose()
@@ -184,8 +222,12 @@ async def main(limit: int, tag: str | None, compare: str | None) -> None:
                   f"answer={r['answer_nonempty']} err={r['error']}")
 
 
-async def _run_case(runtime, question: str, expected_source: str) -> dict:
+async def _run_case(runtime, case: dict) -> dict:
     from app.observability import Recorder, reset_recorder, set_recorder
+
+    question = case["question"]
+    expected_source = case["expected_source"]
+    expected_keywords = case.get("expected_keywords") or []
 
     rec = Recorder(question=question)
     token = set_recorder(rec)
@@ -205,10 +247,18 @@ async def _run_case(runtime, question: str, expected_source: str) -> dict:
     # 口径说明：引用覆盖 = 真值来源文件名必须出现在工具返回的 sources 列表里（精确命中）。
     # 模型在回答正文里复述文件名不算有效引用——避免"看过就复述"被误判为覆盖，评测口径收紧。
     cited = any(expected_source in s for s in sources)
+    # 答案内容质量：金标关键词覆盖率（详见 eval/metrics.keyword_coverage）。
+    # 同时把 answer 原文与 expected_keywords 一起存进报告，这样改了关键词只需
+    # --reanalyze 离线重算（纯字符串匹配），不必重新花钱调 API。
+    cov, missed = keyword_coverage(answer, expected_keywords)
     return {
         "id": 0,
         "answer_nonempty": bool(answer.strip()),
         "citation_covered": cited,
+        "expected_keywords": expected_keywords,
+        "keyword_coverage": round(cov, 4),
+        "keyword_missed": missed,
+        "answer": answer,
         "tool_calls": summary["tool_calls"],
         "llm_calls": summary["llm_calls"],
         "duration_ms": summary["duration_ms"],
@@ -221,9 +271,15 @@ async def _run_case(runtime, question: str, expected_source: str) -> dict:
 def reanalyze() -> None:
     """离线重算已有报告里的指标（不调 API、不需要 key）。
 
-    用途：给历史报告补齐"当初跑的时候还没有的指标"（例如 p50/p95 延迟）——
+    用途一：给历史报告补齐"当初跑的时候还没有的指标"（例如 p50/p95 延迟）——
     per-case 里已经存着 duration_ms/token/cost 明细，指标口径变了不必重花钱重跑。
-    会把补齐后的 metrics 写回同一份报告（per-case 原样保留）。
+
+    用途二（2026-09 新增）：**重算关键词覆盖率**。per-case 里存了 answer 原文与
+    expected_keywords，所以你可以只改 eval/questions.jsonl 里的金标关键词、再跑一次
+    --reanalyze，就拿到新的覆盖率——改评测口径的成本是零，不用重新调模型。
+    这也是加这一维时坚持"把 answer 存进报告"的原因。
+
+    会把补齐后的 metrics 写回同一份报告（per-case 原样保留，除了重算出的关键词字段）。
     """
     reports = sorted(REPORT_DIR.glob("*.json"))
     if not reports:
@@ -235,6 +291,18 @@ def reanalyze() -> None:
         if not results:
             print(f"[skip] {path.name}：无 per_case")
             continue
+        # 先按"已存的 answer + 当前金标关键词"重算关键词覆盖率。
+        # 旧报告没存 answer，这一步会整段跳过（于是那些报告不会凭空多出覆盖率指标）。
+        recomputed = 0
+        for r in results:
+            answer = r.get("answer")
+            kws = r.get("expected_keywords")
+            if answer is None or not kws:
+                continue
+            cov, missed = keyword_coverage(answer, kws)
+            r["keyword_coverage"] = round(cov, 4)
+            r["keyword_missed"] = missed
+            recomputed += 1
         before = report.get("metrics") or {}
         after = _metrics(results)
         report["metrics"] = after
@@ -242,7 +310,8 @@ def reanalyze() -> None:
             json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         changed = {k: v for k, v in after.items() if before.get(k) != v}
-        print(f"[ok] {path.name}  metrics 已重算，变化字段：{changed or '（无）'}")
+        note = f"，关键词覆盖率重算 {recomputed} 条" if recomputed else "（无 answer 字段，跳过关键词重算）"
+        print(f"[ok] {path.name}  metrics 已重算{note}，变化字段：{changed or '（无）'}")
 
 
 if __name__ == "__main__":

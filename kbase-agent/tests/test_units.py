@@ -121,3 +121,64 @@ def test_recursion_limit_derived_from_max_steps():
     # recursion_limit 与 prompt 承诺的 max_steps 同源，避免框架提前掐断
     assert default_recursion_limit() == AgentLimits.max_steps * 2 + 5
     assert default_recursion_limit(25) == 55
+
+
+# —— 身份解析（安全回归）——
+# 背景：早期实现是 `next((r for r in records if r["name"] in question), records[0])`，
+# 两个后果都不是"功能缺失"而是"静默给出错误数据"：
+#   1) 问题里没写姓名时默认返回 records[0]（张三）——把他人年假/报销金额当成提问人的数据；
+#   2) 问题里出现多个姓名时只取列表里第一个命中——同样静默错人。
+# 下面三条把"拒绝而不是猜"的行为锁死，避免以后重构时退回去。
+
+
+def test_query_business_db_refuses_without_employee_name(tmp_path, monkeypatch):
+    from app.mcp import servers
+
+    monkeypatch.setattr(servers, "RECORDS_FILE", tmp_path / "records.jsonl")
+    out = servers.query_business_db(question="我今年还剩几天年假？")
+    assert "无法确定员工身份" in out
+    # 关键断言：只给出一句拒绝说明，绝不夹带任何员工的个人数据
+    # （提示语里以"张三"举例是允许的，所以这里判"没返回数据体"，而不是判"不含张三"）
+    assert "annual_leave_remaining" not in out
+    assert "latest_expense" not in out
+    assert not out.lstrip().startswith("{")
+
+
+def test_query_business_db_refuses_on_ambiguous_names(tmp_path, monkeypatch):
+    from app.mcp import servers
+
+    monkeypatch.setattr(servers, "RECORDS_FILE", tmp_path / "records.jsonl")
+    out = servers.query_business_db(question="张三和李四谁年假多？")
+    assert "多个员工姓名" in out
+    assert "annual_leave_remaining" not in out
+
+
+def test_query_business_db_returns_the_named_employee(tmp_path, monkeypatch):
+    from app.mcp import servers
+
+    monkeypatch.setattr(servers, "RECORDS_FILE", tmp_path / "records.jsonl")
+    out = servers.query_business_db(question="李四还剩几天年假？")
+    assert '"employee": "李四"' in out
+    # 指名李四就绝不能返回张三的数据
+    assert '"employee": "张三"' not in out
+
+
+# —— 答案内容质量指标 ——
+
+
+def test_keyword_coverage_ignores_whitespace_and_misses():
+    from eval.metrics import keyword_coverage
+
+    # 模型写「3 天」、金标写「3天」，去空白归一化后必须算命中
+    cov, missed = keyword_coverage("最多结转 3 天至次年一季度末", ["结转", "3天", "一季度"])
+    assert cov == 1.0
+    assert missed == []
+
+    # 只泛泛说"可以结转"、没给出关键事实 → 覆盖率下降且能报出缺了哪些
+    cov2, missed2 = keyword_coverage("可以结转到明年，具体请咨询 HR", ["结转", "3天", "一季度"])
+    assert cov2 == round(1 / 3, 4) or abs(cov2 - 1 / 3) < 1e-9
+    assert missed2 == ["3天", "一季度"]
+
+    # 空答案 / 无关键词：都不得抛异常
+    assert keyword_coverage("", ["结转"])[0] == 0.0
+    assert keyword_coverage("任意答案", [])[0] == 0.0

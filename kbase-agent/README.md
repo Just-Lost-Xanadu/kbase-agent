@@ -1,13 +1,13 @@
 # kbase-agent
 
-**企业知识库 + 工具调用 Agent（单 Agent）**：基于 LangGraph 的 ReAct 式工具循环，RAG 检索与业务工具经 **MCP 协议真接入**（stdio）；配**两层评测 Harness**（40 条金标：检索层 + 端到端回归）、SQLite 会话持久化、trace/成本可观测与护栏。求职学习项目的旗舰作品。
+**企业知识库 + 工具调用 Agent（单 Agent）**：基于 LangGraph 的 ReAct 式工具循环，RAG 检索与业务工具经 **MCP 协议真接入**（stdio）；配**两层评测 Harness**（40 条金标：检索层 + 端到端回归）、SQLite 会话持久化、trace/成本可观测与护栏。
 
 > **与姊妹项目 `mcp-tools` 的关系**（两仓库是**一个系统的两层**，不是两个重复 demo）：
 > 本仓库是**编排层**——Agent 怎么决策、怎么检索、怎么管状态、怎么评测；
 > `mcp-tools` 是**协议层**——把工具按 MCP 标准做成"可被任何客户端消费"的 Server（安全边界在其内部）。
 > 本项目的工具用 FastMCP 写在 `app/mcp/servers.py`，走真 stdio 子进程；`mcp-tools` 则刻意换成
 > 数据/文件域、并只保留 stdio，用来独立验证"工具与 Agent 解耦、跨客户端复用"这件事本身。
-> 面试口径：**编排与协议分层**，不是"做了两个知识库问答"。
+> 两者合起来是**编排 + 协议分层**，而不是"做了两个知识库问答"。
 
 ## 目录结构
 
@@ -40,7 +40,7 @@ app/
 eval/                  # 40 条评测集 + 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测（19 项）
+tests/                 # smoke + 纯逻辑单测（23 项）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
 docs/
@@ -101,13 +101,23 @@ API：
 
 ![网页对话示例](docs/screenshots/web-chat.png)
 
-## 效果度量（简历口径）
+## 效果度量
 
-`eval/questions.jsonl` 每条含 `expected_source`（40 条、id 1~40 不重复；真值来源全部是 `data/docs/` 里实际存在的 9 篇文件名）：
+`eval/questions.jsonl` 每条含 `expected_source`（40 条、id 1~40 不重复；真值来源全部是 `data/docs/` 里实际存在的 9 篇文件名）
+与 `expected_keywords`（从语料原文提取的关键事实，每条约 2 个，用于答案内容质量评估）：
 - `scripts/eval.py`（检索层，离线零成本）：`topk_hit_rate` 是否命中正确来源。同一脚本里的 `citation_accuracy` 与它是同一个判定（都看 top-k 来源里有没有真值文件），两个数字不会不同——别当成两个指标讲。
-- `scripts/eval_e2e.py`（端到端，真实调 Agent API）：统计回答率（**只判非空**）、引用覆盖（真值来源是否出现在**本轮工具返回的 sources** 里，不判答案文本里有没有引用）、耗时与成本——用于 prompt/模型/工具改动后的回归把关。指标含 `p50_duration_ms` / `p95_duration_ms`（线性插值分位数，口径与 numpy 默认一致），是"单次问答端到端耗时"，**含 MCP 子进程启动 + 检索 + LLM 往返**。
+- `scripts/eval_e2e.py`（端到端，真实调 Agent API）：四个维度——
+  1. 回答率（**只判非空**，最弱口径，只说明"没哑火"）；
+  2. 引用覆盖（真值来源是否出现在**本轮工具返回的 sources** 里，不判答案文本里有没有引用）；
+  3. **答案关键词覆盖率** `answer_keyword_coverage` / `keyword_full_hit_rate`——纯字符串匹配、零 LLM 成本，判"答案有没有把该条问题的核心事实讲出来"。这是对 1、2 两个维度的补位：1 只看非空、2 本质是检索侧判定，**两者都不看答案内容对不对**；
+  4. 耗时与成本（`p50_duration_ms` / `p95_duration_ms`，线性插值分位数，口径与 numpy 默认一致；含 MCP 子进程启动 + 检索 + LLM 往返）。
 
-40 条是回归冒烟集，不是统计评测；简历别写百分比，写"离线回归集 + 可视化坏例调参"。
+> **关键词覆盖率的边界（主动讲清，别当正确率用）**：它只判"有没有提到"，**不判表述是否正确**
+> （不识别否定、条件、张冠李戴），关键词也是人工挑选、粒度粗。所以它是 coverage 而非 accuracy。
+> 另：`per_case` 里存了 answer 原文与 `expected_keywords`，因此**改了金标关键词只需
+> `--reanalyze` 离线重算**（纯字符串匹配），不必重新花钱调 API——改评测口径的成本是零。
+
+40 条是回归冒烟集，不是统计评测；不要用百分比口径对外描述它，说"离线回归集 + 可视化坏例调参"即可。
 
 **两份入库报告的实测数字**（`docs/eval-reports/`，同口径可复算）：
 
@@ -136,28 +146,18 @@ flowchart TD
     H -. 中断并基于现有信息收尾 .-> F
 ```
 
-## 面试可讲点
+## 设计要点
 
-- **框架**：LangGraph 有状态图、SQLite 断点续聊（AsyncSqliteSaver + WAL，重启不丢会话；高并发生产可换 Postgres）；AutoGen 并入 Microsoft Agent Framework 后我以 LangGraph 为主线。
-- **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。
+- **框架**：LangGraph 有状态图、SQLite 断点续聊（AsyncSqliteSaver + WAL，重启不丢会话；高并发生产可换 Postgres）；选 LangGraph 而非预制 Agent 函数，是为了拿到显式状态、checkpoint 与精细护栏。
+- **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。代价是每次工具调用新起子进程，也是端到端延迟的主要来源。
 - **RAG**：混合检索（向量 + BM25 做 RRF）去抖 + 可选重排 + 引用溯源 + 评测集验证，坏例能说清怎么调好的。
 - **工程化**：SSE 节点级流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
 - **效果与成本**：40 条金标两层 Harness（`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；延迟 p50 ≈ 7.4s / p95 ≈ 12.5s、单条成本 ≈ ¥0.0075，`/api/runs` 有节点级 trace 可逐条归因（**延迟大头是每条新起 MCP stdio 子进程 + LLM 往返**，不是检索）。
 
-## 对标 JD 主要能力（面试话术）
-
-| JD 共性要求 | 本项目对应 | 说明 |
-|---|---|---|
-| 标准化评估闭环 | 40 条金标集 + 两层 Harness | `eval.py` 检索层（离线零成本）+ `eval_e2e.py` Agent 层（`--tag` 落报告、`--compare` 回归 diff，指标含回答率/引用覆盖/成本） |
-| Agent 架构与工具调用 | **单 Agent** ReAct 式工具循环 + MCP 工具层 | LangGraph `agent→tools` 条件边做工具路由；决策在模型、编排在框架；多 Agent/Skills 为下一阶段方向（**未实现，不宣称**） |
-| 工程化与生产落地 | 上下文管理 / 工具失效处理 / 持久化 / 可观测 | 工具输出截断、重复工具调用判重（窗口=单次运行内 25 步）防死循环、超时异常结构化回填、checkpoint 断点续聊（SQLite）、trace/成本/历史会话 |
-| 权限与重试降级 | 见"已知取舍"（生产化方向） | 按用户区分权限、工具失败重试/降级列为生产化改进，**未实现不宣称** |
-
 ## 容器化部署设计（**未实施**，方案已想清）
 
 > 说明：本仓库**目前没有 Dockerfile**，下面是把容器化想清楚后的设计，不是已完成能力。
-> 之所以先写设计：面试被问"你会怎么容器化"时，答的是这些判断点（尤其第 2、3 条），
-> 而不是"我还没做"。真正实施时按此落地并补一份实测记录。
+> 先写设计是为了把判断点想明确（尤其第 2、3 条）。真正实施时按此落地并补一份实测记录。
 
 1. **基础镜像与依赖**：`python:3.12-slim` + `pip install -r requirements.lock`（本仓库已锁版本，正好是这里的输入）→ 再 `pip install -e .`。
    `onnxruntime`（FastEmbed 底层）在 slim 上需要补系统库（如 `libgomp1`）；这是个真实的踩坑点，装完要验证 `import onnxruntime`。
@@ -181,12 +181,14 @@ flowchart TD
 - 默认 FastEmbed（ONNX，零 torch）；要更准可 `EMBED_BACKEND=flagembedding` 上 bge-m3，或 `RERANK_ENABLED=true` 加重排——均需 `pip install -e ".[embed]"`。**换 embedding 后删除 `data/chroma/` 重建索引**。
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
-- `MAX_RECURSION` + prompt 第 5 条 `max_steps` + 重复调用检测 = 三道防死循环。
+- **防死循环是三道，不在同一层**（别和"上下文层护栏"混成一类讲）：① prompt 第 6 条 `max_steps`（提示层，让模型自己收敛）② `MAX_RECURSION` / `recursion_limit`（框架层，模型不听话时由框架掐停）③ 重复工具调用判重（逻辑层）。另有两道**不属于防死循环**的护栏：工具输出截断（防上下文爆炸）与单步超时（防单次调用卡死）。
 - 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**替换已有同名文档后请删 `data/chroma/` 重建索引**（增量新增文件可直接 `python scripts/index_docs.py`）。
 - 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户区分与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。
+- **个人数据工具没有鉴权（安全边界，如实说明）**：`query_business_db` 的身份来自"问题文本里出现的姓名"，而不是会话绑定的用户——任何人都可以问别人（例如"李四还剩几天年假"）而拿到其年假余额与报销金额。已修的是**静默错人**：姓名缺失时不再默认返回第一条记录（旧实现会拿张三的数据当提问人的），姓名有歧义时直接拒绝。生产化方向：由会话层注入 `user_id` 并做行级过滤，而不是相信模型传进来的文本。**不对外宣称具备权限控制。**
+- 检索内容直接进 prompt，未做"不可信数据"隔离，因此 prompt 注入属于未防护面（列为方向）。
 - 同一 session 的**并发**请求未做串行保护：LangGraph 状态按 `thread_id` 记，同 thread 并发属"后写覆盖"（多路并发不会报错，但两轮谁先落地不保证）。生产化需按 session 串行或进队列。
 - 多轮对话历史目前全量进上下文（checkpoint 保存全量消息）；超长会话建议后续加历史压缩/裁剪（如 summarize 节点或 max_turns 截断），列为方向。
-- 架构边界明确：当前是**单 Agent + MCP 工具层**；多 Agent 编排 / Skills / 工具失败重试与降级 / prompt 注入防护 是后续方向——面试可主动讲思路，但不写进"已完成"能力。
+- 架构边界明确：当前是**单 Agent + MCP 工具层**；多 Agent 编排 / Skills / 工具失败重试与降级 / prompt 注入防护 / 鉴权限流 都**未实现**，只作为后续方向，不写进"已完成"能力。
 
 ## 常见坑
 

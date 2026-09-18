@@ -101,12 +101,33 @@
   function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
+  // —— 极简 Markdown 处理 ——
+  // 模型（含历史会话里已存下的回答）有时仍会输出 Markdown 标记，直接显示会出现 "## 标题" "**加粗**"。
+  // 这里只做最小可读化：行首标题标记 / 列表符号 / 行内粗体与代码；换行继续交给 CSS 的
+  // white-space: pre-wrap，因此不引入任何依赖，纯文本答案也完全不受影响。
+  function mdInline(s) {
+    return String(s == null ? '' : s)
+      .replace(/(^|\n)\s*#{1,6}\s*/g, '$1')          // 行首 # 标题标记
+      .replace(/(^|\n)\s*[-*]\s+/g, '$1· ')          // 行首 - / * 列表符号
+      .replace(/(^|\n)\s*[-*_]{3,}\s*(?=\n|$)/g, '$1');  // 分隔线
+  }
+  // 纯文本用途（侧栏标题、预览、按钮标签）：去掉所有标记字符
+  function mdStrip(s) {
+    return mdInline(s).replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+  }
+  // 富文本用途（回答正文）：转义后只还原粗体与行内代码
+  function mdToHtml(s) {
+    return esc(mdInline(s))
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+  }
   function addMsg(role, text, sources) {
     const tip = document.getElementById('emptyTip');
     if (tip) tip.remove();
     const div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
-    div.innerHTML = esc(text);
+    // 用户输入保持原样展示；仅对 Agent 回答做 Markdown 可读化
+    div.innerHTML = role === 'user' ? esc(text) : mdToHtml(text);
     if (sources && sources.length) {
       const s = document.createElement('div');
       s.className = 'sources';
@@ -131,7 +152,7 @@
     return (d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
-  function shortLabel(t) { return t.length > 20 ? t.slice(0, 20) + '…' : t; }
+  function shortLabel(t) { t = mdStrip(t); return t.length > 20 ? t.slice(0, 20) + '…' : t; }
 
   // —— 会话列表 ——
   async function refreshSessions() {
@@ -142,8 +163,8 @@
       const b = document.createElement('button');
       b.dataset.sid = s.id;
       b.className = 'session-item' + (s.id === sessionId ? ' active' : '');
-      b.innerHTML = '<div class="t">' + esc(s.title || '（未命名）') + '</div>' +
-                    '<div class="m">' + esc(s.last_preview || '') + '</div>' +
+      b.innerHTML = '<div class="t">' + esc(mdStrip(s.title || '（未命名）')) + '</div>' +
+                    '<div class="m">' + esc(mdStrip(s.last_preview || '')) + '</div>' +
                     '<div class="meta"><span>' + s.message_count + ' 条</span><span>' + fmtTime(s.updated_at) + '</span></div>';
       b.addEventListener('click', () => openSession(s.id));
       listEl.appendChild(b);
@@ -202,6 +223,7 @@
     let finalAnswer = '';
     let finalSources = [];
     let sseError = null;
+    let filled = false;   // 占位气泡是否已写入内容（决定 finally 里要不要移除它）
     let stepPreviewEl = null;
     const makePreview = () => {
       if (!stepPreviewEl) {
@@ -282,7 +304,8 @@
       if (finalAnswer) {
         localStorage.setItem(LS_KEY, sessionId);
         placeholder.className = 'msg bot';
-        placeholder.textContent = finalAnswer;
+        placeholder.innerHTML = mdToHtml(finalAnswer);
+        filled = true;
         if (finalSources && finalSources.length) {
           const s = document.createElement('div');
           s.className = 'sources';
@@ -294,13 +317,15 @@
         console.warn('[kbase] SSE 结束但未收到 done.answer',
           { eventTotal, bufTail: buf.slice(-120), sseError });
         placeholder.textContent = '（空回答）';
+        filled = true;
       }
       labelEl.textContent = shortLabel(q);
     } catch (e) {
       placeholder.textContent = '出错了：' + e.message + '（检查服务端是否已配置 DEEPSEEK_API_KEY）';
+      filled = true;
     } finally {
       clearPreview();
-      if (placeholder.textContent === '' && placeholder.childNodes.length === 0) placeholder.remove();
+      if (!filled) placeholder.remove();
       setBusy(false);
       refreshSessions();
       input.focus();
