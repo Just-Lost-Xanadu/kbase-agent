@@ -50,7 +50,7 @@ def _percentile(values: list[int | float], q: float) -> float:
     """线性插值分位数（与 numpy.percentile 默认口径一致，避免依赖 numpy）。
 
     n=40、q=0.95 时落在这两份报告的实测区间内；样本极少（n<3）时退化为最大/最小值，
-    该口径已写进 README，避免被问到时无法说明分位数是怎么算出来的。
+    该口径已写进 README，便于复核分位数是怎么算出来的。
     """
     if not values:
         return 0.0
