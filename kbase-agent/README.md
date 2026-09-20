@@ -40,7 +40,7 @@ app/
 eval/                  # 40 条评测集 + 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测（23 项）
+tests/                 # smoke + 纯逻辑单测（24 项，`pytest` 实测 24 passed）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
 docs/
@@ -104,15 +104,15 @@ API：
 ## 效果度量
 
 `eval/questions.jsonl` 每条含 `expected_source`（40 条、id 1~40 不重复；真值来源全部是 `data/docs/` 里实际存在的 9 篇文件名）
-与 `expected_keywords`（从语料原文提取的关键事实，每条约 2 个，用于答案内容质量评估）：
-- `scripts/eval.py`（检索层，离线零成本）：`topk_hit_rate` 是否命中正确来源。同一脚本里的 `citation_accuracy` 与它是同一个判定（都看 top-k 来源里有没有真值文件），两个数字不会不同——别当成两个指标讲。
+与 `expected_keywords`（从语料原文提取的关键事实，每条 1~3 个，用于答案内容质量评估）：
+- `scripts/eval.py`（检索层，离线零成本）：`topk_hit_rate` 是否命中正确来源。同一脚本里的 `citation_accuracy` 与它是同一个判定（都看 top-k 来源里有没有真值文件），两个数字必然相同，不应作为两个独立指标看待。
 - `scripts/eval_e2e.py`（端到端，真实调 Agent API）：四个维度——
   1. 回答率（**只判非空**，最弱口径，只说明"没哑火"）；
   2. 引用覆盖（真值来源是否出现在**本轮工具返回的 sources** 里，不判答案文本里有没有引用）；
   3. **答案关键词覆盖率** `answer_keyword_coverage` / `keyword_full_hit_rate`——纯字符串匹配、零 LLM 成本，判"答案有没有把该条问题的核心事实讲出来"。这是对 1、2 两个维度的补位：1 只看非空、2 本质是检索侧判定，**两者都不看答案内容对不对**；
   4. 耗时与成本（`p50_duration_ms` / `p95_duration_ms`，线性插值分位数，口径与 numpy 默认一致；含 MCP 子进程启动 + 检索 + LLM 往返）。
 
-> **关键词覆盖率的边界（主动讲清，别当正确率用）**：它只判"有没有提到"，**不判表述是否正确**
+> **关键词覆盖率的边界（本指标不构成正确率）**：它只判"有没有提到"，**不判表述是否正确**
 > （不识别否定、条件、张冠李戴），关键词也是人工挑选、粒度粗，**而且对同义改写敏感**——
 > 例如语料写"JSON/CSV"、模型答"JSON 或 CSV"就会漏判（真实发生过，处置见下）。所以它是
 > coverage 而非 accuracy。
@@ -121,7 +121,7 @@ API：
 > 这一点已经实测：把两条用例的关键词从 `JSON/CSV` 改成 `CSV` 后跑 `--reanalyze`，
 > `answer_keyword_coverage` 由 0.9875 变为 1.0，**没有产生任何 API 费用**。
 
-40 条是回归冒烟集，不是统计评测；不要用百分比口径对外描述它，说"离线回归集 + 可视化坏例调参"即可。
+40 条是回归冒烟集，不是统计评测，因此本文所有结论都按"离线回归集 + 可视化坏例调参"的定性口径陈述，不用百分比对外描述能力。
 
 **三份入库报告的实测数字**（`docs/eval-reports/`，同口径可复算）：
 
@@ -131,7 +131,7 @@ API：
 | `fullrun-verify.json` | fullrun-verify / 2026-09-13 | 40/40 | 40/40 | *（旧口径，未采集）* | 7497 ms | 12975 ms | ¥0.3020 |
 | `baseline-v2.json` | baseline-v2 / 2026-09-18 | 40/40 | 40/40 | **1.0（全命中率 1.0）** | 6438 ms | 11049 ms | ¥0.3029 |
 
-**这些数字要会自己解释**（否则会被追问穿）：
+**这些数字的含义与边界**（避免把弱指标当成效果证明）：
 - 三次 `citation_accuracy` 全是 1.0、`--compare` 报"无逐条变化"，说明**该集合当前没有区分度**——
   它的价值是"防劣化的回归基线"，不是"效果有多好"的证明；
 - **新加的关键词覆盖率在这个集合上也饱和到 1.0**，所以它同样**不是"质量有多好"的证明**。
@@ -142,9 +142,9 @@ API：
 - 想让评测有区分度，正确做法是**加更难的金标**（多跳、跨文档冲突、应拒答题），不是调参刷分；
 - 延迟 p50 ≈ 6.4s / p95 ≈ 11.0s，且不同轮次之间 p95 有 ~1s 抖动（`baseline` vs `baseline-v2`
   就差了 1319ms），**主要成本是每条都新起 stdio 子进程 + 真实 LLM 往返**，这也是本项目最该优化的
-  工程点（见「已知取舍」）。所以**别把单次跑的 p95 当稳定指标讲**，只能用于同环境相对比较。
+  工程点（见「已知取舍」）。所以**单次运行的 p95 不是稳定指标**，只能用于同环境下的相对比较。
 
-**口径边界（别被追问才想起来）**：40 条都是**单轮**提问（每条走新 thread，不共享上下文），所以**多轮行为不在评测覆盖内**。同一 session 续聊时历史会累积，模型可能直接基于上下文作答而**不再调工具**，该轮 `sources` 因此为空——引用只统计**本轮**工具返回，历史轮次的来源不会带过来（`data/business` 个人数据工具输出也不含【来源：】标记，本来就不贡献 sources）。
+**口径边界（本文明确声明的覆盖范围）**：40 条都是**单轮**提问（每条走新 thread，不共享上下文），所以**多轮行为不在评测覆盖内**。同一 session 续聊时历史会累积，模型可能直接基于上下文作答而**不再调工具**，该轮 `sources` 因此为空——引用只统计**本轮**工具返回，历史轮次的来源不会带过来（`data/business` 个人数据工具输出也不含【来源：】标记，本来就不贡献 sources）。
 
 ## Agent 决策流程
 
@@ -168,7 +168,7 @@ flowchart TD
 - **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。代价是每次工具调用新起子进程，也是端到端延迟的主要来源。
 - **RAG**：混合检索（向量 + BM25 做 RRF）去抖 + 可选重排 + 引用溯源 + 评测集验证，坏例能说清怎么调好的。
 - **工程化**：SSE 节点级流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
-- **效果与成本**：40 条金标两层 Harness（`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；延迟 p50 ≈ 7.4s / p95 ≈ 12.5s、单条成本 ≈ ¥0.0075，`/api/runs` 有节点级 trace 可逐条归因（**延迟大头是每条新起 MCP stdio 子进程 + LLM 往返**，不是检索）。
+- **效果与成本**：40 条金标两层 Harness（`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；最近一轮基线（baseline-v2）实测延迟 p50 ≈ 6.4s / p95 ≈ 11.0s、单条成本 ≈ ¥0.0076，`/api/runs` 有节点级 trace 可逐条归因（**延迟大头是每条新起 MCP stdio 子进程 + LLM 往返**，不是检索）。
 
 ## 容器化部署设计（**未实施**，方案已想清）
 
@@ -198,7 +198,7 @@ flowchart TD
 - 默认 FastEmbed（ONNX，零 torch）；要更准可 `EMBED_BACKEND=flagembedding` 上 bge-m3，或 `RERANK_ENABLED=true` 加重排——均需 `pip install -e ".[embed]"`。**换 embedding 后删除 `data/chroma/` 重建索引**。
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
-- **防死循环是三道，不在同一层**（别和"上下文层护栏"混成一类讲）：① prompt 第 6 条 `max_steps`（提示层，让模型自己收敛）② `MAX_RECURSION` / `recursion_limit`（框架层，模型不听话时由框架掐停）③ 重复工具调用判重（逻辑层）。另有两道**不属于防死循环**的护栏：工具输出截断（防上下文爆炸）与单步超时（防单次调用卡死）。
+- **防死循环是三道，不在同一层**（与"上下文层护栏"不属于同一类）：① prompt 第 6 条 `max_steps`（提示层，让模型自己收敛）② `MAX_RECURSION` / `recursion_limit`（框架层，模型不听话时由框架掐停）③ 重复工具调用判重（逻辑层）。另有两道**不属于防死循环**的护栏：工具输出截断（防上下文爆炸）与单步超时（防单次调用卡死）。
 - 解析层支持 `.md/.txt/.docx/.xlsx/.pdf`（统一抽成纯文本/表格文本）；扫描件/图片类 PDF 无文本层，需 OCR，列为扩展。**`scripts/index_docs.py` 是全量重建**：每次都会重新解析全部文档、**先清空 collection 再写入**，所以替换文档、增删文档、甚至换切分法都直接重跑它即可，不需要手工删 `data/chroma/`。
   （为什么必须先清空：`chunk_id = source#method#idx` 带 method 但**不带 chunk_size/overlap**，换切分法时旧 id 覆盖不到会永久残留 → 向量路召回旧切片、而 BM25 的 sidecar 只有新切片，两路口径不一致。这是实测复现过的缺陷，已有回归测试锁住“先 reset 再 add”的顺序。换 embedding 模型仍需重建，理由同前。）
 - 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户区分与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。

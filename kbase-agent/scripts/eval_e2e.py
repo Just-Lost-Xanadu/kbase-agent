@@ -50,7 +50,7 @@ def _percentile(values: list[int | float], q: float) -> float:
     """线性插值分位数（与 numpy.percentile 默认口径一致，避免依赖 numpy）。
 
     n=40、q=0.95 时落在这两份报告的实测区间内；样本极少（n<3）时退化为最大/最小值，
-    口径写进 README，避免"p95 是怎么算的"被追问时说不出。
+    该口径已写进 README，避免被问到时无法说明分位数是怎么算出来的。
     """
     if not values:
         return 0.0
@@ -67,7 +67,7 @@ def _percentile(values: list[int | float], q: float) -> float:
 def _latency(results: list[dict]) -> dict:
     """从已有 per-case 里算延迟分位（纯离线，数据来自 recorder 的 duration_ms）。
 
-    面试口径：p50/p95 是"单次问答端到端耗时"，含 MCP 子进程启动 + 检索 + LLM 往返；
+    口径说明：p50/p95 是"单次问答端到端耗时"，含 MCP 子进程启动 + 检索 + LLM 往返；
     样本是 40 条单轮金标集，不是线上流量，只用于改动前后的相对比较。
     """
     durations = [r["duration_ms"] for r in results if r.get("duration_ms") is not None]

@@ -33,3 +33,6 @@ kbase-agent/docs/eval-reports/*.json
 .idea/
 .vscode/
 .DS_Store
+
+# 本地同步/网盘工具的临时标记文件（不属于项目内容）
+*.baiduyun.uploading.cfg
