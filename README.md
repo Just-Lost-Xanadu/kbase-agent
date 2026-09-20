@@ -42,3 +42,7 @@ Windows 上也可直接双击 `kbase-agent/start.bat`（一键建 venv → 装�
 两仓库是**一个系统的两层**，不是两个重复 demo：本仓库是**编排层**（Agent 怎么决策、怎么检索、
 怎么管状态、怎么评测），[`mcp-tools`](https://github.com/Just-Lost-Xanadu/mcp-tools) 是**协议层**
 （把工具按 MCP 标准做成可被任何客户端消费的 Server，安全边界在其内部）。
+
+## 许可证
+
+[MIT](./LICENSE) © 2026 Just-Lost-Xanadu
