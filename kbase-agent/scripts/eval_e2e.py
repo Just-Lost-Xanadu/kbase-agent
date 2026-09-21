@@ -2,17 +2,25 @@
 
 分层说明（与 scripts/eval.py 的区别）：
 - eval.py        ：检索层 Harness（离线、零成本、快），测 top-k 是否命中真值来源。
-- eval_e2e.py    ：Agent 层 Harness（真实调 DeepSeek），五个维度：
+- eval_e2e.py    ：Agent 层 Harness（真实调 DeepSeek），六个维度：
                    ① answer_rate      —— 回答非空（最弱口径，只保证"没哑火"）
                    ② citation_accuracy—— **检索口径**：真值来源出现在本轮工具返回的来源里
                    ③ answer_citation_rate
                                       —— **答案引用口径**：真值来源出现在答案正文的【来源：X】里
                                          比 ② 更严：检索到了不等于答案标了。两个都留，因为
-                                         ②与已入库的三份基线可比，③才是"引用溯源"的真问题。
+                                         ②与已入库的基线可比，③才是"引用溯源"的真问题。
                    ④ answer_keyword_coverage / keyword_full_hit_rate
                                       —— **答案内容质量**：金标关键词覆盖率（纯字符串匹配、零 LLM 成本）
-                   ⑤ p50/p95 延迟、token、成本
-                   是 prompt/模型/工具改动后防劣化的回归手段。
+                   ⑤ refusal_accuracy —— **应拒答通过率**：语料里没有答案时，有没有如实说不知道、
+                                         而不是编出一个具体承诺（弱代理指标，见 _refusal_ok）
+                   ⑥ p50/p95 延迟、token、成本
+                   是 prompt/模型/工具/语料改动后防劣化的回归手段。
+
+金标集里的三类用例（写法见 eval/questions.jsonl，metrics 侧统一由 eval.metrics.gold_sources 解析）：
+   - 单源 `expected_source` ：答案在一篇文档里；
+   - 多跳 `expected_sources`：需要多篇共同回答，②③ 都要求**每一篇都命中**；
+   - 应拒答 `should_refuse` ：没有真值来源，不进 ②③ 的分母，只走 ⑤。
+报告末尾按 difficulty 分档汇总——一个总命中率会掩盖"难例全军覆没"。
 
 用法：
     python scripts/eval_e2e.py --tag baseline              # 全量 40 条，记为 baseline
@@ -40,11 +48,36 @@ try:
 except AttributeError:  # Python < 3.7
     pass
 
-from eval.metrics import hit_rate, keyword_coverage  # noqa: E402
+from eval.metrics import gold_sources, hit_rate, is_refusal_case, keyword_coverage  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_FILE = ROOT / "eval" / "questions.jsonl"
 REPORT_DIR = ROOT / "docs" / "eval-reports"
+
+# 应拒答判定用的"如实说不知道"标记。系统提示里明确要求"知识库没有的内容如实说
+# 『资料中没有』"，所以模型按契约作答时这些词大概率出现。
+REFUSAL_MARKERS = (
+    "资料中没有", "资料中未", "资料里没有", "资料里未",
+    "未收录", "没有收录", "知识库中没有", "暂无相关", "没有找到相关", "没有相关规定",
+)
+
+
+def _refusal_ok(answer: str, case: dict) -> tuple[bool, list[str]]:
+    """应拒答用例的判定：既要说清"资料里没有"，又不能把没有的事说成真的。
+
+    返回 (是否通过, 命中的"编造特征"列表)。
+
+    这是一个**弱代理指标**，与 keyword_coverage 同一性质：字符串匹配判不出
+    "编得很像但确实是编的"。它真正能抓住的是两类失败：
+      ① 哑火 / 答非所问 —— 没有如实说明资料里没有；
+      ② 把语料里根本不存在的具体承诺（行权价、贷款额度…）说得像真的 ——
+         这类特征串由用例自带 `must_not_contain` 给出。
+    因此对外只用"应拒答通过率"这个说法，不宣称它是"幻觉率"。
+    """
+    text = answer or ""
+    said_unknown = any(m in text for m in REFUSAL_MARKERS)
+    fabricated = [m for m in (case.get("must_not_contain") or []) if m in text]
+    return (said_unknown and not fabricated), fabricated
 
 
 def _load_cases() -> list[dict]:
@@ -84,26 +117,39 @@ def _latency(results: list[dict]) -> dict:
 
 
 def _metrics(results: list[dict]) -> dict:
+    # 应拒答用例没有真值来源，不能算进"回答率/引用覆盖"的分母——它们各有自己的判定
+    # （refusal_accuracy）。混在一起会让引用类指标凭空下降，那是口径 bug 不是效果变化。
+    scored = [r for r in results if not r.get("refusal_case")]
+    refusal = [r for r in results if r.get("refusal_case")]
     metrics = {
         "cases": len(results),
-        "answer_rate": round(hit_rate([{"hit": r["answer_nonempty"]} for r in results]), 4),
-        "citation_accuracy": round(hit_rate([{"hit": r["citation_covered"]} for r in results]), 4),
+        "scored_cases": len(scored),
+        "refusal_cases": len(refusal),
+        "answer_rate": round(hit_rate([{"hit": r["answer_nonempty"]} for r in scored]), 4),
+        "citation_accuracy": round(hit_rate([{"hit": r["citation_covered"]} for r in scored]), 4),
         "total_cost_cny": round(sum(r["cost_cny"] for r in results), 4),
         "avg_tokens": round(sum(r["total_tokens"] for r in results) / max(len(results), 1)),
-        "passed": sum(1 for r in results if r["answer_nonempty"] and r["citation_covered"]),
+        "passed": sum(1 for r in scored if r["answer_nonempty"] and r["citation_covered"]),
     }
+    if refusal:
+        metrics["refusal_accuracy"] = round(
+            hit_rate([{"hit": bool(r.get("refusal_ok"))} for r in refusal]), 4
+        )
     # 答案内容质量维度（2026-09 新增）：金标关键词覆盖率。
     # 只在 per_case 里真的有该字段时输出——旧报告没有存 answer，--reanalyze 会自然跳过，
     # 于是 --compare 也不会拿"有"和"没有"去比，避免误报。
-    coverages = [r["keyword_coverage"] for r in results if r.get("keyword_coverage") is not None]
+    # 必须遍历 `scored` 而不是 `results`：应拒答用例的 expected_keywords 是空的，
+    # keyword_coverage 会返回 0.0，把它们算进分母会让覆盖率凭空掉 4 个点——
+    # 这是口径 bug，不是质量下降（首版就踩了：0.8917 其实是 4 个 0 拖出来的）。
+    coverages = [r["keyword_coverage"] for r in scored if r.get("keyword_coverage") is not None]
     if coverages:
         metrics["answer_keyword_coverage"] = round(sum(coverages) / len(coverages), 4)
         metrics["keyword_full_hit_rate"] = round(
             sum(1 for c in coverages if c >= 1.0) / len(coverages), 4
         )
     # 答案引用口径（比 citation_accuracy 更严）：真值来源要出现在**答案正文**的【来源：X】里。
-    # 同一批旧报告没有这个字段，所以同样只在存在时输出，保证 --compare 不误报。
-    cited_flags = [r["answer_cited"] for r in results if r.get("answer_cited") is not None]
+    # 同样只看 scored：应拒答用例没有真值来源，answer_cited 恒为 False，不能进分母。
+    cited_flags = [r["answer_cited"] for r in scored if r.get("answer_cited") is not None]
     if cited_flags:
         metrics["answer_citation_rate"] = round(
             sum(1 for c in cited_flags if c) / len(cited_flags), 4
@@ -121,6 +167,7 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         ("answer_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("citation_accuracy", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("answer_citation_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
+        ("refusal_accuracy", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("answer_keyword_coverage", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("keyword_full_hit_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("p50_duration_ms", "{:.0f}", "{:.0f}", "{:+.0f}"),
@@ -218,12 +265,19 @@ async def main(limit: int, tag: str | None, compare: str | None) -> None:
             await runtime.aclose_thread(thread_id)
             r["id"] = case["id"]
             results.append(r)
-            mark = "OK" if r["citation_covered"] and r["answer_nonempty"] else "FAIL"
+            if r["refusal_case"]:
+                mark = "OK" if r.get("refusal_ok") else "FAIL"
+                extra = f"refused={r.get('refusal_ok')}"
+                if r.get("refusal_fabricated"):
+                    extra += f" 编造特征={r['refusal_fabricated']}"
+            else:
+                mark = "OK" if r["citation_covered"] and r["answer_nonempty"] else "FAIL"
+                extra = f"tools={r['tool_calls']}"
             print(
                 f"[{idx}/{len(cases)}] #{case['id']} {mark} "
-                f"tools={r['tool_calls']} cost=¥{r['cost_cny']:.4f} "
-                f"tok={r['total_tokens']} kw={r['keyword_coverage']:.2f} "
-                f"{r['error'] or ''}"
+                f"[{r.get('difficulty') or '单源'}] {extra} "
+                f"cost=¥{r['cost_cny']:.4f} tok={r['total_tokens']} "
+                f"kw={r['keyword_coverage']:.2f} {r['error'] or ''}"
             )
     finally:
         await runtime.aclose()
@@ -257,20 +311,44 @@ async def main(limit: int, tag: str | None, compare: str | None) -> None:
             base = json.loads(base_file.read_text(encoding="utf-8"))
             _compare(compare, tag, base, report)
 
-    failures = [r for r in results if not (r["citation_covered"] and r["answer_nonempty"])]
+    failures = [
+        r for r in results
+        if (r.get("refusal_ok") is False)
+        or (not r.get("refusal_case") and not (r["citation_covered"] and r["answer_nonempty"]))
+    ]
     if failures:
         print("\n失败用例（坏例调参入手点）：")
         for r in failures:
-            print(f"  #{r['id']}  citation={r['citation_covered']} "
+            print(f"  #{r['id']}  [{r.get('difficulty') or '单源'}] "
+                  f"refusal_ok={r.get('refusal_ok')} citation={r['citation_covered']} "
                   f"answer={r['answer_nonempty']} err={r['error']}")
+
+    # 按难度分档：一个总命中率会掩盖"难例全军覆没"，这一层视图才是加难金标的意义所在。
+    by_diff: dict[str, list[dict]] = {}
+    for r in results:
+        by_diff.setdefault(r.get("difficulty") or "单源(未标注)", []).append(r)
+    print("\n== 按难度分档（端到端）==")
+    for diff, rows in sorted(by_diff.items()):
+        non_ref = [r for r in rows if not r.get("refusal_case")]
+        ref = [r for r in rows if r.get("refusal_case")]
+        parts = []
+        if non_ref:
+            ok = sum(1 for r in non_ref if r["citation_covered"] and r["answer_nonempty"])
+            parts.append(f"检索引用 {ok}/{len(non_ref)}")
+        if ref:
+            ok = sum(1 for r in ref if r.get("refusal_ok"))
+            parts.append(f"应拒答 {ok}/{len(ref)}")
+        print(f"  {diff:<12} {' | '.join(parts)}")
 
 
 async def _run_case(runtime, case: dict, thread_id: str | None = None) -> dict:
     from app.observability import Recorder, reset_recorder, set_recorder
 
     question = case["question"]
-    expected_source = case["expected_source"]
+    expected_source = case.get("expected_source")
     expected_keywords = case.get("expected_keywords") or []
+    gold = gold_sources(case)                 # 单源或多跳（多跳要求全部命中）
+    refusal_case = is_refusal_case(case)      # 语料里没有答案，判"有没有编造"
 
     rec = Recorder(question=question)
     token = set_recorder(rec)
@@ -291,24 +369,33 @@ async def _run_case(runtime, case: dict, thread_id: str | None = None) -> dict:
     sources = result["sources"] or []
     retrieved = result.get("retrieved_sources") or []
     # 口径说明：`citation_covered` 仍然是**检索口径**——真值来源文件名必须出现在
-    # "本轮工具返回的 sources"（现名 retrieved_sources）列表里。保持它不变是为了让
-    # 三份已入库的基线报告（baseline / fullrun-verify / baseline-v2）继续可比：
+    # "本轮工具返回的来源"（`retrieved_sources`）里。保持它不变是为了让已入库的
+    # 四份基线报告（baseline / fullrun-verify / baseline-v2 / post-parallel）继续可比：
     # 它们的 per_case 里只有这个字段，改了含义会让历史基线作废、--compare 失去意义。
+    # 多跳用例要求**每一篇真值都出现**——只召回一半等于答不全。
     # 模型在回答正文里复述文件名不算有效引用——避免"看过就复述"被误判为覆盖。
-    cited = any(expected_source in s for s in retrieved)
-    # 新增的**答案引用口径**：真值来源必须出现在答案正文的【来源：X】里。
-    # 这是更严的真实引用判定（README 早先就写明"citation_accuracy 本质是检索侧判定、
-    # 不看答案文本"，这条把那个缺口补上），且与上面那条互不替代。
-    answer_cited = any(expected_source in s for s in sources)
+    cited = bool(gold) and all(any(g in s for s in retrieved) for g in gold)
+    # 答案引用口径：真值来源必须出现在答案正文的【来源：X】里（比上面那条更严）。
+    answer_cited = bool(gold) and all(any(g in s for s in sources) for g in gold)
     # 答案内容质量：金标关键词覆盖率（详见 eval/metrics.keyword_coverage）。
     # 同时把 answer 原文与 expected_keywords 一起存进报告，这样改了关键词只需
     # --reanalyze 离线重算（纯字符串匹配），不必重新花钱调 API。
     cov, missed = keyword_coverage(answer, expected_keywords)
+    refusal_ok, fabricated = (None, [])
+    if refusal_case:
+        refusal_ok, fabricated = _refusal_ok(answer, case)
     return {
         "id": 0,
+        "difficulty": case.get("difficulty"),
+        "refusal_case": refusal_case,
         "answer_nonempty": bool(answer.strip()),
         "citation_covered": cited,
         "answer_cited": answer_cited,
+        "refusal_ok": refusal_ok,
+        "refusal_fabricated": fabricated,
+        "must_not_contain": case.get("must_not_contain") or [],
+        "expected_source": expected_source,
+        "expected_sources": case.get("expected_sources"),
         "retrieved_sources": retrieved,
         "expected_keywords": expected_keywords,
         "keyword_coverage": round(cov, 4),
@@ -365,6 +452,19 @@ def reanalyze() -> None:
             r["keyword_coverage"] = round(cov, 4)
             r["keyword_missed"] = missed
             recomputed += 1
+        # 应拒答用例同样支持离线重算：per_case 里存了 answer 原文与 must_not_contain，
+        # 所以调整"如实说不知道"的标记或补充"编造特征"后，跑一次 --reanalyze 即可，
+        # 不必重新花钱调模型（与关键词覆盖率同一个设计意图）。
+        refusal_recomputed = 0
+        for r in results:
+            if not r.get("refusal_case"):
+                continue
+            answer = r.get("answer")
+            if answer is None:
+                continue
+            ok, fab = _refusal_ok(answer, {"must_not_contain": r.get("must_not_contain") or []})
+            r["refusal_ok"], r["refusal_fabricated"] = ok, fab
+            refusal_recomputed += 1
         before = report.get("metrics") or {}
         after = _metrics(results)
         report["metrics"] = after
@@ -373,6 +473,8 @@ def reanalyze() -> None:
         )
         changed = {k: v for k, v in after.items() if before.get(k) != v}
         note = f"，关键词覆盖率重算 {recomputed} 条" if recomputed else "（无 answer 字段，跳过关键词重算）"
+        if refusal_recomputed:
+            note += f"，应拒答重算 {refusal_recomputed} 条"
         print(f"[ok] {path.name}  metrics 已重算{note}，变化字段：{changed or '（无）'}")
 
 

@@ -38,3 +38,23 @@
 {"id": 38, "question": "连续两季度绩效得 C 会怎样？", "gold_answer": "进入绩效改进计划（PIP）2 个月后复评", "expected_source": "薪酬与绩效制度_示例.md", "expected_keywords": ["PIP", "2个月"]}
 {"id": 39, "question": "年终奖怎么算？年底前离职还有吗？", "gold_answer": "基数×绩效系数×在职月数/12，发放日前离职不享受", "expected_source": "薪酬与绩效制度_示例.md", "expected_keywords": ["绩效系数", "在职月数"]}
 {"id": 40, "question": "公司年度调薪一般在什么时候？一年能调几次？", "gold_answer": "年度调薪窗口每年 3 月，一年一次；晋升调薪除外", "expected_source": "薪酬与绩效制度_示例.md", "expected_keywords": ["3月", "晋升"]}
+{"id": 41, "difficulty": "多跳", "question": "加班攒的调休多久不用会清零？节假日值班算不算加班？", "expected_sources": ["员工手册_示例.md", "值班与应急值班安排_示例.md"], "expected_keywords": ["3个月", "不等同于加班"], "note": "前半在《员工手册》调休规则，后半在《值班与应急值班安排》；只召回一篇答不全。"}
+{"id": 42, "difficulty": "多跳", "question": "实习生加班能进调休池吗？正式员工的加班又是几倍计入调休的？", "expected_sources": ["实习生与劳务派遣管理办法_示例.md", "员工手册_示例.md"], "expected_keywords": ["不适用", "1.5倍"], "note": "实习生规则是对《员工手册》的通则做排除，两篇必须一起看才不会答错。"}
+{"id": 43, "difficulty": "多跳", "question": "客户数据在传输和存储上分别怎么加密？我们内部又把客户名单归为哪一级？", "expected_sources": ["产品FAQ_示例.md", "信息安全与数据分级制度_示例.md"], "expected_keywords": ["TLS 1.2", "秘密级"], "note": "加密实现与内部分级是两个体系（产品对外承诺 vs 公司内部制度）。"}
+{"id": 44, "difficulty": "多跳", "question": "订阅到期后数据还能导出吗？导出任务本身有什么限制？", "expected_sources": ["产品FAQ_示例.md", "产品数据导入导出FAQ_示例.md"], "expected_keywords": ["30天", "行数上限"], "note": "保留窗口在《产品FAQ》，导出机制在《产品数据导入导出FAQ》。"}
+{"id": 45, "difficulty": "冲突", "question": "实习生享有年假吗？", "expected_source": "实习生与劳务派遣管理办法_示例.md", "expected_keywords": ["不享有年假"], "note": "《员工手册》规定了年假，但《实习生与劳务派遣管理办法》明确排除非正式用工人员，后者优先。"}
+{"id": 46, "difficulty": "冲突", "question": "境外出差的住宿费按什么标准报销？", "expected_source": "差旅与出差管理办法_示例.md", "expected_keywords": ["当地货币限额"], "note": "《员工手册》的住宿标准只适用于境内；境外由《差旅与出差管理办法》单独规定。"}
+{"id": 47, "difficulty": "冲突", "question": "外包人员的账号到期后还想继续用，需要办什么手续？", "expected_source": "账号权限与访问审批流程_示例.md", "expected_keywords": ["重新审批"], "note": "《IT与账号管理制度》只讲到“到期自动失效”，延期手续在《账号权限与访问审批流程》。"}
+{"id": 48, "difficulty": "冲突", "question": "发票开出来之后多久内必须提交报销？", "expected_source": "发票与税务合规指引_示例.md", "expected_keywords": ["90"], "note": "《员工手册》讲的是“报销单按月提交、跨年发票不予受理”，发票自身的提交时限在《发票与税务合规指引》。"}
+{"id": 49, "difficulty": "应拒答", "should_refuse": true, "question": "公司有员工股权激励或期权计划吗？怎么行权？", "expected_keywords": [], "must_not_contain": ["行权价", "授予价格", "期权池"], "note": "语料里的薪酬制度只讲工资/绩效/年终奖，没有任何股权激励内容。"}
+{"id": 50, "difficulty": "应拒答", "should_refuse": true, "question": "公司提供托儿所或子女入学补贴吗？", "expected_keywords": [], "must_not_contain": ["入托", "学费报销"], "note": "《员工福利与体检制度》只列体检、节日、团建、通讯交通补贴。"}
+{"id": 51, "difficulty": "应拒答", "should_refuse": true, "question": "员工买房可以申请公司的无息贷款吗？", "expected_keywords": [], "must_not_contain": ["贷款额度", "免息额度"], "note": "语料里没有任何购房类福利。"}
+{"id": 52, "difficulty": "应拒答", "should_refuse": true, "question": "公司给员工缴纳企业年金吗？", "expected_keywords": [], "must_not_contain": ["年金缴费比例", "企业缴费比例"], "note": "《薪酬结构与个税申报说明》只涉及五险一金与个税，没有年金。"}
+{"id": 53, "difficulty": "单源", "question": "境外出差的保险是谁买？可以自己加购之后报销吗？", "expected_source": "差旅与出差管理办法_示例.md", "expected_keywords": ["公司统一购买"], "note": "问句里有“出差”“报销”，与《员工手册》差旅段高度撞词。"}
+{"id": 54, "difficulty": "单源", "question": "对外赠送客户纪念品的额度由谁核定？", "expected_source": "业务招待费与礼品管理办法_示例.md", "expected_keywords": ["市场部"], "note": "与《员工手册》的保密与廉洁条款撞词，但额度核定只在招待礼品办法里。"}
+{"id": 55, "difficulty": "单源", "question": "连续请病假 5 天，要提交什么级别的医院证明？", "expected_source": "病假与医疗期管理制度_示例.md", "expected_keywords": ["二级及以上医院"], "note": "《员工手册》只要求“医院证明”，分级要求在这份专门制度里。"}
+{"id": 56, "difficulty": "单源", "question": "婚假必须在多久之内休完？逾期能补吗？", "expected_source": "婚育假与育儿假实施办法_示例.md", "expected_keywords": ["一年内"], "note": "与《员工手册》请假段撞词。"}
+{"id": 57, "difficulty": "单源", "question": "远程办公当天还需要打卡吗？", "expected_source": "弹性工作与远程办公管理办法_示例.md", "expected_keywords": ["正常考勤时段"], "note": "与《员工手册》考勤段、以及《考勤与打卡管理办法》三方撞词，真值在最专门的那份。"}
+{"id": 58, "difficulty": "单源", "question": "公司数据一共分几级？客户名单属于哪一级？", "expected_source": "信息安全与数据分级制度_示例.md", "expected_keywords": ["四级", "秘密级"], "note": "分级体系只有这份制度定义，但《IT与账号管理制度》也讲数据外发。"}
+{"id": 59, "difficulty": "单源", "question": "新供应商需要提交哪些材料和经过谁的审核，才能进入合格供应商名录？", "expected_source": "采购与供应商管理办法_示例.md", "expected_keywords": ["营业执照", "法务"], "note": "与《发票与税务合规指引》《合同评审与用印管理办法》在同一业务链上。"}
+{"id": 60, "difficulty": "单源", "question": "参加外部培训的考试费能报销吗？会不会要求服务期？", "expected_source": "培训与认证补贴制度_示例.md", "expected_keywords": ["考试费", "服务期"], "note": "问句里有“报销”，与《员工手册》报销段撞词，但真值在培训制度里。"}

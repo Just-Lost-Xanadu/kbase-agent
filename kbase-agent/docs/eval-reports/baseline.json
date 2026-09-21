@@ -3,6 +3,8 @@
   "created_at": "2026-09-07 18:55:24",
   "metrics": {
     "cases": 40,
+    "scored_cases": 40,
+    "refusal_cases": 0,
     "answer_rate": 1.0,
     "citation_accuracy": 1.0,
     "total_cost_cny": 0.2927,

@@ -186,6 +186,125 @@ def test_keyword_coverage_ignores_whitespace_and_misses():
     assert keyword_coverage("任意答案", [])[0] == 0.0
 
 
+# —— 金标用例的三类写法与指标口径 ——
+# 背景：金标集从 40 条单源扩到含"多跳/冲突/应拒答"三类难例。三类用例的判定口径不同，
+# 混在一起算会让指标失真（最典型：把没有真值的应拒答用例算进引用覆盖率的分母，
+# 指标凭空下降——那是口径 bug，不是效果变化）。
+
+
+def test_gold_sources_supports_single_multi_and_refusal():
+    from eval.metrics import gold_sources, is_refusal_case
+
+    single = {"id": 1, "expected_source": "a.md"}
+    multi = {"id": 2, "expected_sources": ["a.md", "b.md"]}
+    refuse = {"id": 3, "should_refuse": True, "expected_keywords": []}
+    bare = {"id": 4}   # 没写真值来源，等同于应拒答
+
+    assert gold_sources(single) == ["a.md"]
+    assert gold_sources(multi) == ["a.md", "b.md"]   # 多跳优先于单源
+    assert gold_sources(refuse) == []
+    assert gold_sources(bare) == []
+
+    assert is_refusal_case(refuse) is True
+    assert is_refusal_case(bare) is True
+    assert is_refusal_case(single) is False
+    assert is_refusal_case(multi) is False
+
+
+def test_multi_hop_requires_every_source():
+    """多跳用例只召回一半不算命中——否则"两篇才答得全"的难度就被抹掉了。"""
+    from eval.metrics import citation_accuracy
+
+    results = [
+        {"expected_sources": ["a.md", "b.md"], "sources": ["a.md", "b.md", "c.md"]},  # 全中
+        {"expected_sources": ["a.md", "b.md"], "sources": ["a.md", "c.md"]},          # 缺一篇 → 不算
+        {"expected_sources": ["a.md", "b.md"], "sources": ["b.md"]},                  # 只有一篇 → 不算
+    ]
+    # citation_accuracy 返回原始比值（取整发生在 summarize 里）
+    assert abs(citation_accuracy(results) - 1 / 3) < 1e-9
+
+
+def test_refusal_cases_are_excluded_from_citation_denominator():
+    """应拒答用例没有真值来源，不能算进引用覆盖率的分母（否则指标凭空下降）。"""
+    from eval.metrics import citation_accuracy, summarize
+
+    results = [
+        {"expected_source": "a.md", "sources": ["a.md"], "retrieval_hit": True},
+        {"expected_source": "b.md", "sources": ["a.md"], "retrieval_hit": False},
+        {"should_refuse": True, "sources": [], "retrieval_hit": False},   # 不参与
+    ]
+    # 分母是 2（真有真值的用例），不是 3
+    assert citation_accuracy(results) == 0.5
+
+    summary = summarize(results)
+    assert summary["cases"] == 3
+    assert summary["scored_cases"] == 2
+    assert summary["refusal_cases"] == 1
+    assert summary["topk_hit_rate"] == 0.5      # 同样只在 2 条上算
+    assert summary["citation_accuracy"] == 0.5
+
+
+def test_e2e_metrics_exclude_refusal_cases_from_all_denominators():
+    """应拒答用例必须从**每一个**以真值为分母的指标里排除掉，不能只排除一部分。
+
+    首版只把 citation_accuracy 排除了，关键词覆盖率与答案引用率没排 —— 应拒答用例的
+    关键词列表是空的（keyword_coverage=0.0）、answer_cited 恒为 False，于是它们被当成
+    "失败"算进分母，两个指标凭空掉了约 4 个点。这类口径 bug 很难从数字本身看出来，
+    所以用一条测试把"四个分母口径一致"钉死。
+    """
+    from scripts.eval_e2e import _metrics
+
+    results = [
+        {"refusal_case": False, "answer_nonempty": True, "citation_covered": True,
+         "answer_cited": True, "keyword_coverage": 1.0, "cost_cny": 0.01,
+         "total_tokens": 100},
+        {"refusal_case": False, "answer_nonempty": True, "citation_covered": False,
+         "answer_cited": False, "keyword_coverage": 0.5, "cost_cny": 0.01,
+         "total_tokens": 100},
+        # 应拒答：没有真值来源，keyword_coverage 恒为 0、answer_cited 恒为 False
+        {"refusal_case": True, "answer_nonempty": True, "citation_covered": False,
+         "answer_cited": False, "keyword_coverage": 0.0, "refusal_ok": True,
+         "cost_cny": 0.01, "total_tokens": 100},
+    ]
+    m = _metrics(results)
+    assert m["cases"] == 3 and m["scored_cases"] == 2 and m["refusal_cases"] == 1
+    # 四个以真值为分母的指标都只看那 2 条
+    assert m["answer_rate"] == 1.0
+    assert m["citation_accuracy"] == 0.5
+    assert m["answer_citation_rate"] == 0.5
+    assert m["answer_keyword_coverage"] == 0.75     # (1.0 + 0.5) / 2，不是 /3
+    assert m["keyword_full_hit_rate"] == 0.5
+    # 应拒答单独算，且全过
+    assert m["refusal_accuracy"] == 1.0
+    # 成本与 token 是全量口径（它们与真值无关）
+    assert m["total_cost_cny"] == 0.03
+
+
+def test_refusal_ok_flags_fabrication_and_missing_disclaimer():
+    """应拒答判定：既要如实说"资料里没有"，又不能把没有的事说成真的。"""
+    from scripts.eval_e2e import _refusal_ok
+
+    case = {"must_not_contain": ["行权价", "期权池"]}
+
+    ok, fab = _refusal_ok("资料中没有关于股权激励的内容，建议咨询人力资源部。", case)
+    assert ok is True and fab == []
+
+    # 哑火 / 答非所问：没有如实说明 → 不通过
+    ok, _ = _refusal_ok("公司提供有竞争力的薪酬体系。", case)
+    assert ok is False
+
+    # 说了"资料中没有"却又把不存在的事实说得像真的 → 不通过，并报出命中的特征串
+    ok, fab = _refusal_ok("资料中没有明确说明，但行权价一般为每股 10 元。", case)
+    assert ok is False and fab == ["行权价"]
+
+
+def test_refusal_ok_without_must_not_contain_still_checks_disclaimer():
+    from scripts.eval_e2e import _refusal_ok
+
+    ok, fab = _refusal_ok("这个资料里没有收录，我无法确认。", {})
+    assert ok is True and fab == []
+
+
 # —— 索引重建：不能残留旧 chunk ——
 # 背景（已实测复现）：chunk_id 是 `source#method#idx`，带 method 但不带 chunk_size/overlap。
 # 于是换切分法时旧 id 覆盖不到 → 向量库残留旧切片，而 BM25 的 sidecar 是整份覆盖写的、

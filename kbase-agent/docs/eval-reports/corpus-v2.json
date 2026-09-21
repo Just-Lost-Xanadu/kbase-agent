@@ -1,0 +1,1912 @@
+{
+  "tag": "corpus-v2",
+  "created_at": "2026-09-21 16:23:36",
+  "metrics": {
+    "cases": 60,
+    "scored_cases": 56,
+    "refusal_cases": 4,
+    "answer_rate": 1.0,
+    "citation_accuracy": 0.9821,
+    "total_cost_cny": 0.4418,
+    "avg_tokens": 2814,
+    "passed": 55,
+    "refusal_accuracy": 1.0,
+    "answer_keyword_coverage": 0.9554,
+    "keyword_full_hit_rate": 0.9286,
+    "answer_citation_rate": 0.9821,
+    "p50_duration_ms": 6646,
+    "p95_duration_ms": 7860,
+    "max_duration_ms": 31477
+  },
+  "per_case": [
+    {
+      "id": 1,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "婚育假与育儿假实施办法_示例.md",
+        "实习生与劳务派遣管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "结转",
+        "3天",
+        "一季度"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "关于年假规则，资料中是这样规定的：\n\n- 正式员工入职满一年后，每年享有带薪年假 10 天，按自然年计算。\n- 当年未休完的年假最多结转 3 天至次年一季度末，其余作废。\n- 年假以\"小时\"为单位申请，最小请休单位为半天；连续请休超过 5 天需提前 2 周在 OA 报备部门负责人。\n- 离职时未休年假按日工资折算补偿。\n\n也就是说，年假可以部分累计到明年，但上限是 3 天，且必须在次年一季度末前用完，超出部分会作废。\n\n至于你个人今年还剩多少天年假，需要你提供姓名我才能查询——系统不会猜测或沿用他人数据。请告诉我你的姓名，我再帮你查具体余额。\n\n【来源：员工手册_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7781,
+      "cost_cny": 0.0073,
+      "total_tokens": 2747,
+      "error": null
+    },
+    {
+      "id": 2,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "差旅与出差管理办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "500",
+        "350",
+        "自理"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "出差住宿报销上限标准如下：\n\n- 一线城市（北上广深杭）：每晚不超过 500 元\n- 其他城市：每晚不超过 350 元\n- 超限部分由个人自理\n\n另外两点相关提示：\n- 出差前须在 OA 发起出差申请，写明事由、行程与预算，经直属主管审批后方可出行。\n- 境外住宿不适用上述境内标准，按当地货币限额执行，由财务按下榻城市商务酒店均价每半年核定一次。\n\n【来源：员工手册_示例.md】【来源：差旅与出差管理办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6253,
+      "cost_cny": 0.0062,
+      "total_tokens": 2605,
+      "error": null
+    },
+    {
+      "id": 3,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "实习生与劳务派遣管理办法_示例.md",
+        "值班与应急值班安排_示例.md"
+      ],
+      "expected_keywords": [
+        "OA",
+        "3个月",
+        "清零"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "加班申请与调休的规则如下（依据《员工手册》）：\n\n加班申请\n- 需提前在 OA 提交申请，写明加班原因与预估时长，由直属主管审批。\n- 紧急突发情况可先执行、后补单，补单须在 24 小时内完成。\n\n调休规则\n- 加班补偿统一进\"调休池\"，不折算加班费。\n- 折算倍数：工作日加班按 1.5 倍调休计入；法定节假日加班按 2 倍调休计入。\n- 调休需在 3 个月内用完，逾期清零。\n- 调休申请同样走 OA，审批通过后可选任意工作日调休。\n\n两点容易混淆的边界，供参考：\n- 值班不等同于加班：值班期间未实际处理事务的不计入调休池；值班期间实际工作且超过 2 小时的，该部分时长单独统计，按加班流程另行申请。\n- 非正式用工人员（实习生、劳务派遣、退休返聘）不适用上述调休池规则，其加班时长按协议折算为实习补贴，不累积调休、不设有效期。\n\n【来源：员工手册_示例.md】【来源：值班与应急值班安排_示例.md】【来源：实习生与劳务派遣管理办法_示例.md】\n\n如果你想知道自己的调休余额或某笔加班单的审批状态，告诉我你的姓名，我可以帮你查一下个人数据。",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6682,
+      "cost_cny": 0.0075,
+      "total_tokens": 2687,
+      "error": null
+    },
+    {
+      "id": 4,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "考勤与打卡管理办法_示例.md",
+        "弹性工作与远程办公管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "3个工作日",
+        "补卡",
+        "3次"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "忘记打卡的补卡规则如下：\n\n- 提交时限：须在 3 个工作日内通过 OA 提交补卡申请。\n- 所需材料：需附可佐证出勤的材料，例如会议纪要、IM 记录等。\n- 次数限制：每月补卡不得超过 3 次，超出的按迟到处理。\n- 迟到后果：迟到 30 分钟以上按半天事假扣减。\n- 远程办公情形：远程当天仍按正常考勤时段打卡；因网络故障无法打卡的，同样按补卡条款提交材料，且每月补卡次数与现场办公合并计算。\n- 出差/外勤情形：出差、外勤期间无须到办公区打卡，但须在考勤系统中提交外勤/出差单作为出勤凭证，出差单须与 OA 出差申请对应，两者不一致时以 OA 申请为准。\n- 补充说明：迟到、早退、缺卡等异常的处理规则与补办流程，统一按《员工手册》考勤章节执行；《考勤与打卡管理办法》只规定记录与确认环节。另外，代打卡属于严重违纪行为，切勿尝试。\n\n【来源：员工手册_示例.md】【来源：考勤与打卡管理办法_示例.md】【来源：弹性工作与远程办公管理办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 7112,
+      "cost_cny": 0.0072,
+      "total_tokens": 2629,
+      "error": null
+    },
+    {
+      "id": 5,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "发票与税务合规指引_示例.md",
+        "员工手册_示例.md",
+        "差旅与出差管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "复印件",
+        "80%"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "软件发票（电子发票）丢失的处理，按公司现行规定如下：\n\n- 报销须提供合规增值税发票，抬头为公司全称；电子发票属于公司可受理的票据类型。\n- 发票丢失的，可提供商户开具的发票复印件加盖章，或银行流水加情况说明，由财务审批后按 80% 报销。\n- 若丢失发票金额超过 2000 元，还须部门负责人签字确认。\n- 发票开具后须在 90 个自然日内提交报销，超期原则上不予受理，确有特殊原因须财务负责人审批；跨年发票原则上不予受理（12 月发生的除外）。\n- 所有提交的发票都会通过税务平台查验真伪，查验不通过的退回。\n\n补充提示：电子发票通常可在开票平台或税务平台重新下载/查验，建议先尝试重新获取原件，能拿到原件就按正常流程全额报销，不必走丢失流程。\n\n【来源：员工手册_示例.md】【来源：发票与税务合规指引_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6787,
+      "cost_cny": 0.0064,
+      "total_tokens": 2445,
+      "error": null
+    },
+    {
+      "id": 6,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品FAQ_示例.md",
+        "产品性能与容量规划FAQ_示例.md",
+        "产品交付与售后FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "单机",
+        "4核8G"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "私有化部署的最少服务器台数取决于你要的部署形态：\n\n- 单机试用版：1 台即可，4 核 8G，适合功能验证与小型场景。\n- 生产高可用版：至少 3 台节点（2 台应用 + 1 台数据库）。应用节点建议 8 核 16G，数据库节点建议 16G 以上并配置主从。\n- 补充说明：标准版可单机部署用于评估，但生产环境建议至少三节点集群以消除单点；高可用版还要求数据库与对象存储独立部署，具体台数需按并发与数据量测算。\n\n运行环境要求：Linux（CentOS 7+ / Ubuntu 20.04+）与 Docker 20.10+，支持主流云厂商 ECS 与本地 IDC。\n\n【来源：产品FAQ_示例.md】【来源：产品性能与容量规划FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6135,
+      "cost_cny": 0.0068,
+      "total_tokens": 2667,
+      "error": null
+    },
+    {
+      "id": 7,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品FAQ_示例.md",
+        "产品性能与容量规划FAQ_示例.md",
+        "产品计费与订阅FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "429",
+        "指数退避",
+        "商务"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "API 返回 429 表示触发了限流，处理方式如下：\n\n- 限流规则：API 默认 QPS 为 50，突发可到 100；超过限额即返回 HTTP 429。限流阈值按租户维度隔离，单个租户超限不影响其他租户。\n- 重试策略：收到 429 后请做指数退避重试，建议从 1s 起、最多 5 次，间隔按 1s / 2s / 4s / 8s / 16s 递增。\n- 需要更高配额：联系商务升级套餐；突发流量也可通过临时提额缓解，但需提前提交申请。\n- 容量侧建议：接口并发能力受实例规格与后端存储影响，实际配额以开通时下发的为准；上线前建议做一次压测，压测报告可作为扩容依据。扩容支持垂直扩容（升配）与水平扩容（加节点），水平扩容需要前置负载均衡与共享存储。\n\n【来源：产品FAQ_示例.md】【来源：产品性能与容量规划FAQ_示例.md】【来源：产品计费与订阅FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5910,
+      "cost_cny": 0.0069,
+      "total_tokens": 2533,
+      "error": null
+    },
+    {
+      "id": 8,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "信息安全与数据分级制度_示例.md",
+        "产品FAQ_示例.md",
+        "等保与合规认证FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "TLS",
+        "AES-256"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "客户数据加密分传输和存储两个环节，具体做法如下：\n\n传输环节\n- 传输层全部走 TLS 1.2 及以上版本。\n- 对外传输优先使用公司统一的数据交换平台，禁止使用个人邮箱、即时通讯工具传输秘密级及以上数据。\n- 秘密级及以上数据对外提供须经数据Owner与法务双重审批，并留存审批记录。\n- 支持客户自带证书（BYOC）。\n\n存储环节\n- 存储层使用 AES-256 加密落盘。\n- 密钥由客户托管或平台 KMS 托管，客户可选。\n- 提供国密 SM4 存储加密选项。\n- 公司配发的终端默认开启全盘加密与屏幕锁定；接入公司网络的个人终端须通过合规检查；移动存储介质须使用公司统一加密盘。\n- 客户名单、合同金额、个人身份信息属于秘密级及以上，任何情况下不得存储于个人设备或公共网盘。\n\n配套措施\n- 日志不记录明文请求体，脱敏后的审计日志仅保留 180 天。\n- 数据访问与导出行为全程留痕并定期审计。\n\n【来源：产品FAQ_示例.md】【来源：信息安全与数据分级制度_示例.md】【来源：等保与合规认证FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6490,
+      "cost_cny": 0.0072,
+      "total_tokens": 2598,
+      "error": null
+    },
+    {
+      "id": 9,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品计费与订阅FAQ_示例.md",
+        "产品FAQ_示例.md",
+        "产品审计与操作日志FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "30天",
+        "CSV"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "试用版到期后的数据保留规则如下：\n\n- 试用版到期后，数据保留 30 天，期间可随时导出为 JSON/CSV。\n- 作为对比：正式版到期未续费，保留 60 天后清空，导出窗口同样是到期后这段时间。\n- 另外，账号删除后，关联的检索索引与缓存数据会在 24 小时内同步清理。\n- 订阅到期前系统会通过邮件与站内信提醒；到期后先进入宽限期，宽限期内只读可用，宽限期结束后才按上述数据保留规则处理。\n\n【来源：产品FAQ_示例.md】【来源：产品计费与订阅FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6579,
+      "cost_cny": 0.006,
+      "total_tokens": 2442,
+      "error": null
+    },
+    {
+      "id": 10,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工投诉与举报处理办法_示例.md",
+        "员工手册_示例.md",
+        "业务招待费与礼品管理办法_示例.md",
+        "信息安全与数据分级制度_示例.md",
+        "等保与合规认证FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "保密",
+        "解除劳动合同"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "按现有制度，这类情况分两条线处理：实体处分看《员工手册》的保密与廉洁条款，程序走《员工投诉与举报处理办法》。\n\n实体处理（违规行为本身）\n- 员工在客户现场或对外合作中，不得私自拍照、录音、拷贝客户资料，这是明确的禁止性规定。\n- 违反保密与廉洁条款的，视情节给予警告，直至解除劳动合同；涉嫌违法的移交司法机关。\n- 如果拍照内容涉及客户名单、合同金额、个人身份信息等秘密级及以上数据，还叠加《信息安全与数据分级制度》的追责：违反该制度造成数据泄露的，按情节给予处分直至解除劳动合同，涉嫌犯罪的移交司法机关。\n- 注意：制度只给了\"警告直至解除劳动合同\"这个区间，没有按\"被客户投诉\"这一情形规定固定档位，具体档位需由处理部门结合情节（拍摄内容敏感度、是否外传、是否造成泄露或客户损失、是否初犯）裁量。\n\n程序处理（投诉与调查）\n- 受理范围包含员工违规违纪行为的投诉举报，受理部门为合规与人力资源部联合小组；与举报事项有直接利害关系的人员须回避。\n- 受理后 3 个工作日内完成初步核实并决定是否立案；立案后开展调查，调查过程保护举报人身份，材料按秘密级信息管理。\n- 调查结论与处理决定在规定时限内反馈举报人（匿名举报无法反馈的除外）。\n- 任何形式的打击报复一经查实从重处理，直至解除劳动合同。\n\n另外，客户侧若涉及安全事件，按《等保与合规认证FAQ》，服务方需按约定时限通知受影响客户、提供事件说明与整改措施并配合监管报送。\n\n需要提醒的是：知识库中没有针对\"客户现场违规拍照被投诉\"的专门细则（例如具体处分档位表、是否需向客户书面致歉的流程），这部分资料中没有，建议由合规与人力资源部按上述条款裁量。\n\n【来源：员工手册_示例.md】【来源：员工投诉与举报处理办法_示例.md】【来源：信息安全与数据分级制度_示例.md】【来源：等保与合规认证FAQ_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 8225,
+      "cost_cny": 0.0104,
+      "total_tokens": 3562,
+      "error": null
+    },
+    {
+      "id": 11,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "入职转正与离职制度_示例.md",
+        "婚育假与育儿假实施办法_示例.md"
+      ],
+      "expected_keywords": [
+        "折算",
+        "日工资"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "会给补偿。按公司制度，离职时未休完的年假按日工资折算补偿。\n\n具体要点：\n- 补偿方式：离职时未休年假按日工资折算补偿，不是直接作废。\n- 结算时间：薪资与年假折算在离职流程全部完成后，于次月发薪日一并结清。\n- 前提条件：需完成交接清单并由直属主管与接手人双人确认，未完成交接不办理离职结算。\n- 注意区分：年假可以折算补偿，但育儿假是\"当年有效，不结转、不折现\"，两者规则不同。\n\n另外提醒一下年假本身的结转规则：当年未休完的年假最多结转 3 天至次年一季度末，其余作废——所以平时也建议尽早安排休假。\n\n如果你想知道自己当前还剩多少年假、离职能折算多少，请告诉我你的姓名，我帮你查一下个人数据。\n\n【来源：员工手册_示例.md】【来源：入职转正与离职制度_示例.md】【来源：婚育假与育儿假实施办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 7291,
+      "cost_cny": 0.0073,
+      "total_tokens": 2823,
+      "error": null
+    },
+    {
+      "id": 12,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "值班与应急值班安排_示例.md",
+        "实习生与劳务派遣管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "2倍",
+        "调休"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据员工手册的规定，法定节假日加班的算法如下：\n\n- 加班补偿统一进\"调休池\"，不折算加班费。\n- 法定节假日加班按 2 倍调休计入（即加班 1 小时，调休池记 2 小时）。\n- 作为对比：工作日加班按 1.5 倍调休计入。\n- 调休需在 3 个月内用完，逾期清零；调休申请走 OA，审批通过后可选任意工作日调休。\n- 加班需提前在 OA 提交申请，写明原因与预估时长，由直属主管审批；紧急情况可先执行后补单，补单须在 24 小时内完成。\n\n另外提醒两点容易混淆的地方：\n\n- 值班不等同于加班。法定节假日、周末及夜间为保障连续性而安排的待命属于值班，值班期间未实际处理事务的不计入调休池；值班按日发放值班补贴，若值班期间实际工作超过 2 小时，该部分时长单独统计，按加班流程另行申请。\n- 实习生、劳务派遣、退休返聘等非正式用工人员不适用上述调休池规则，其加班时长按协议折算为补贴，不累积调休。\n\n【来源：员工手册_示例.md】【来源：值班与应急值班安排_示例.md】【来源：实习生与劳务派遣管理办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 7122,
+      "cost_cny": 0.0074,
+      "total_tokens": 2661,
+      "error": null
+    },
+    {
+      "id": 13,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "差旅与出差管理办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "一线城市",
+        "500"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "可以全额报销。\n\n- 上海属于一线城市（北上广深杭），住宿标准为每晚不超过 500 元。\n- 你实际花费 480 元/晚，未超过 500 元限额，因此可以全额报销。\n- 提醒：需提供合规增值税发票，发票抬头须为公司全称；出差前应在 OA 发起出差申请并经直属主管审批；报销单按月提交，报销款在审批通过后 7 个工作日内打款。\n\n【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5949,
+      "cost_cny": 0.0063,
+      "total_tokens": 2641,
+      "error": null
+    },
+    {
+      "id": 14,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "发票与税务合规指引_示例.md",
+        "采购与供应商管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "公司全称"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "报销发票的抬头是有明确要求的，要点如下：\n\n- 抬头必须是公司全称，不能用简称、个人名义或其他单位名称。\n- 开票信息（公司全称、纳税人识别号、地址电话、开户行账号）以财务部每季度公示的版本为准；因开票信息填错导致发票作废的，重开费用由报销人自己承担。\n- 交通与餐补类发票同样要求抬头为公司全称，电子行程单需与发票一并提交。\n- 发票内容须与实际业务一致，不得开成\"办公用品\"\"耗材\"等笼统品名。\n- 可受理增值税专用发票、普通发票和合规电子发票；定额发票、手写票据、非税务监制收据一律不受理。\n- 时限上，发票开具后须在 90 个自然日内提交报销，超期原则上不受理（特殊情况需财务负责人审批）；跨年发票原则上不受理，12 月发生的除外。\n- 发票丢失的，可用商户盖章的发票复印件，或银行流水加情况说明，经财务审批后按 80% 报销；金额超 2000 元的还需部门负责人签字确认。\n\n【来源：员工手册_示例.md】【来源：发票与税务合规指引_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6468,
+      "cost_cny": 0.0068,
+      "total_tokens": 2464,
+      "error": null
+    },
+    {
+      "id": 15,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "病假与医疗期管理制度_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "2个工作日",
+        "医院证明"
+      ],
+      "keyword_coverage": 0.5,
+      "keyword_missed": [
+        "医院证明"
+      ],
+      "answer": "关于病假申请，制度规定如下：\n\n- 申请方式：须在 OA 提交病假申请，并上传医院出具的病假证明，由直属主管审批。\n- 突发情况：可先电话或 IM 报备直属主管，返岗后 2 个工作日内补齐流程与材料。\n- 材料要求：连续病假超过 3 天的，须提供二级及以上医院的诊断证明。\n- 长期病假返岗：返岗前须提交复工证明；岗位已调整的，由部门与人力资源部共同安排过渡期。\n- 病假工资：按当地最低工资标准的一定比例计发（员工手册中写明为 80%），具体比例按工龄分档，由薪酬组在算薪时执行。\n\n需要说明的是，制度中没有规定病假必须\"提前多少天\"提交，只要求提前在 OA 提交申请；突发疾病可先报备、返岗后 2 个工作日内补流程。\n\n【来源：病假与医疗期管理制度_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 7124,
+      "cost_cny": 0.007,
+      "total_tokens": 2668,
+      "error": null
+    },
+    {
+      "id": 16,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "业务招待费与礼品管理办法_示例.md",
+        "员工投诉与举报处理办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "严禁",
+        "礼品礼金"
+      ],
+      "keyword_coverage": 0.0,
+      "keyword_missed": [
+        "严禁",
+        "礼品礼金"
+      ],
+      "answer": "关于合作方送茶叶能不能收，按公司制度是这样规定的：\n\n- 员工不得收受合作方的现金、有价证券与贵重物品。\n- 收到无法当场拒绝的礼品，须在 24 小时内在 OA 登记，并交综合管理部统一处置。\n- 价值较低且易腐坏的食品类礼品，可以登记后由团队内部消化，但不得由个人带离公司。\n- 未登记、瞒报或私下留用的，按违纪处理；金额较大或多次发生的，可解除劳动合同并追偿。\n\n具体到你这盒茶叶：\n\n- 如果只是普通茶叶、价值不高，属于\"价值较低\"的食品类礼品，可以收下但必须先在 OA 登记，然后交给团队内部消化，不能自己带回家。\n- 如果茶叶属于贵重物品（比如高档礼盒、名贵茶），则不能收，应尽量当场婉拒；实在推不掉，24 小时内在 OA 登记并交综合管理部处置。\n- 无论哪种情况，关键动作都是\"登记备案\"，不要私下留用。\n\n如果对价值是否算\"贵重\"拿不准，建议直接问综合管理部或合规邮箱确认。\n\n【来源：业务招待费与礼品管理办法_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 7491,
+      "cost_cny": 0.007,
+      "total_tokens": 2515,
+      "error": null
+    },
+    {
+      "id": 17,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "入职转正与离职制度_示例.md",
+        "薪酬与绩效制度_示例.md"
+      ],
+      "expected_keywords": [
+        "折算",
+        "日工资"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据制度，可以折算成钱。\n\n- 员工手册「年假」条款明确：离职时未休年假按日工资折算补偿。\n- 入职转正与离职制度「离职流程」条款进一步说明：薪资与年假折算在离职流程全部完成后，于次月发薪日一并结清。\n\n所以李四剩下的 1 天年假，在办完离职交接后可以按日工资折算成补偿，随离职结算在次月发薪日发放。\n\n需要注意两点：\n- 前提是离职流程（含交接清单双人确认）全部完成，未完成交接不办理离职结算。\n- 这里说的是「离职时未休年假」的折算；如果是平时未休完的年假，规则是当年最多结转 3 天至次年一季度末，其余作废，并不折现。\n\n另外，你提到「李四今年只剩 1 天年假」，这个剩余天数属于个人数据。如果你需要我核对李四实际的年假剩余天数，请确认一下员工姓名（李四），我再帮你查业务系统里的个人数据。\n\n【来源：员工手册_示例.md】【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6887,
+      "cost_cny": 0.008,
+      "total_tokens": 3042,
+      "error": null
+    },
+    {
+      "id": 18,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "员工手册_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "实习生与劳务派遣管理办法_示例.md",
+        "员工手册_示例.md",
+        "值班与应急值班安排_示例.md"
+      ],
+      "expected_keywords": [
+        "3个月",
+        "清零"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据员工手册的规定，加班调休是有有效期的：\n\n- 加班补偿统一进\"调休池\"，不折算加班费。工作日加班按 1.5 倍、法定节假日加班按 2 倍计入调休。\n- 调休需在 3 个月内用完，逾期清零。\n- 调休申请走 OA，审批通过后可选任意工作日调休。\n\n所以王五攒的调休如果超过 3 个月没休，是会过期清零的。\n\n另外提醒一点：如果王五属于实习生、劳务派遣或退休返聘等非正式用工人员，则不适用上述调休池规则，其加班时长按协议折算为补贴，不累积调休、也不设调休有效期。\n\n如果你需要我查一下王五本人的调休余额和具体到期情况，请确认一下他的姓名（以及是否为正式员工），我再帮你查询个人数据。\n\n【来源：员工手册_示例.md】【来源：实习生与劳务派遣管理办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6723,
+      "cost_cny": 0.0068,
+      "total_tokens": 2611,
+      "error": null
+    },
+    {
+      "id": 19,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品FAQ_示例.md",
+        "产品性能与容量规划FAQ_示例.md",
+        "数据备份与灾备方案FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "3台",
+        "8核16G"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "生产高可用版最少 3 台服务器。\n\n- 节点构成：2 台应用节点 + 1 台数据库节点\n- 应用节点规格：8 核 16G\n- 数据库节点规格：建议 16G 以上，并配置主从\n- 运行环境：Linux（CentOS 7+ / Ubuntu 20.04+）、Docker 20.10+\n- 补充要求：高可用版要求数据库与对象存储独立部署，具体台数需按并发与数据量测算；生产环境建议至少三节点集群以消除单点\n\n另外提醒一点：高可用解决的是单点故障导致的短时不可用，数据备份解决的是数据损坏与误删除，两者不能互相替代，所以 3 台只是高可用的最低部署要求，备份方案仍需单独规划。\n\n【来源：产品FAQ_示例.md】【来源：产品性能与容量规划FAQ_示例.md】【来源：数据备份与灾备方案FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6559,
+      "cost_cny": 0.0067,
+      "total_tokens": 2556,
+      "error": null
+    },
+    {
+      "id": 20,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品数据导入导出FAQ_示例.md",
+        "产品计费与订阅FAQ_示例.md",
+        "产品FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "30天",
+        "CSV"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "可以导出，但要注意时间窗口。\n\n- 试用版到期后，数据保留 30 天，这 30 天内可随时导出。\n- 正式版到期未续费，保留 60 天后清空，导出窗口同样是这 60 天。\n- 另外，订阅到期后会先进入宽限期，宽限期内系统只读可用；宽限期结束后才按数据保留规则处理。\n- 账号删除后，关联的检索索引与缓存数据会在 24 小时内同步清理，这部分不在导出范围内。\n\n导出格式：\n- 结构化数据默认导出 CSV（UTF-8 带 BOM，方便 Excel 直接打开）和 JSON 两种格式。\n- 报表类数据可导出 Excel。\n- 具体可导出范围与当前订阅版本有关。\n\n补充提示：大批量导出是以后台任务方式执行的，任务完成后通过站内信通知下载；单个导出任务有行数上限，超过上限建议按时间范围分批导出，或改用增量接口。\n\n【来源：产品FAQ_示例.md】【来源：产品数据导入导出FAQ_示例.md】【来源：产品计费与订阅FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6617,
+      "cost_cny": 0.0069,
+      "total_tokens": 2583,
+      "error": null
+    },
+    {
+      "id": 21,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品审计与操作日志FAQ_示例.md",
+        "产品FAQ_示例.md",
+        "信息安全与数据分级制度_示例.md",
+        "等保与合规认证FAQ_示例.md",
+        "IT与账号管理制度_示例.md"
+      ],
+      "expected_keywords": [
+        "不记录明文"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "关于你的请求内容是否会被记录到日志，知识库里有相关说明，整理如下：\n\n- 日志不记录明文请求体。产品在存储层使用 AES-256 加密落盘，日志中不保留明文请求内容，脱敏后的审计日志仅保留 180 天。\n- 系统会记录的是管理类操作（账号创建、权限变更、配置修改、数据导出）的操作人、时间、来源 IP 与操作对象，形成审计日志；审计日志不可修改、不可删除。\n- 审计日志与业务日志是分开存储的：审计日志回答\"谁做了什么操作\"，业务日志用于排障与性能分析，两者留存策略不同。\n- 数据访问与导出行为全程留痕并定期审计；导出行为本身也会被记入审计日志。\n- 审计日志的留存期限与客户订阅版本有关，企业版可按合规要求申请延长，留存期满后按数据保留规则处理。\n\n简单说：你的请求内容不会以明文形式被记录，但涉及数据访问、导出等敏感操作的行为会留痕并被审计。\n\n如果你关心的是某个具体系统（比如内部业务系统）的日志策略，可以告诉我系统名称，我再帮你确认。\n\n【来源：产品FAQ_示例.md】【来源：产品审计与操作日志FAQ_示例.md】【来源：信息安全与数据分级制度_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7841,
+      "cost_cny": 0.0096,
+      "total_tokens": 3623,
+      "error": null
+    },
+    {
+      "id": 22,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品FAQ_示例.md",
+        "账号权限与访问审批流程_示例.md",
+        "竞业限制与保密协议实施办法_示例.md"
+      ],
+      "expected_keywords": [
+        "IP白名单",
+        "二次验证"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "可以。根据产品 FAQ 的账号与权限说明，管理员具备 IP 白名单设置能力，因此可以限制只有指定 IP（例如公司内网 IP 段）才能登录系统。\n\n相关要点：\n- 支持 RBAC 角色权限，最小粒度为单应用内功能权限。\n- 管理员可设置 IP 白名单与登录二次验证，支持对接企业微信、钉钉、LDAP 单点登录。\n- 所有敏感操作（导数据、删库、改权限）均记录审计日志并支持导出。\n\n补充说明：知识库中只提到\"IP 白名单\"这一能力，没有进一步说明白名单的具体配置方式、支持的数量上限或是否支持 IP 段/网段写法。如需这些细节，建议联系商务或技术支持确认。\n\n【来源：产品FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6696,
+      "cost_cny": 0.0065,
+      "total_tokens": 2547,
+      "error": null
+    },
+    {
+      "id": 23,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品FAQ_示例.md",
+        "产品性能与容量规划FAQ_示例.md",
+        "产品数据导入导出FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "50",
+        "100"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "接口限流规则如下：\n\n- 默认 QPS 为 50，突发可到 100。\n- 超过限额会返回 HTTP 429，建议收到 429 后做指数退避重试：从 1s 起，最多 5 次，间隔按 1s/2s/4s/8s/16s 递增。\n- 限流阈值按租户维度隔离，单个租户超限不影响其他租户。\n- 需要更高 QPS 请联系商务升级套餐。\n- 另外，突发流量也可以通过临时提额缓解，但需要提前提交申请；实际配额以开通时下发的为准，接口并发能力还受实例规格与后端存储影响。\n\n所以：平时按 50 QPS 走，突发能冲到 100；想长期更高或临时大幅提额，分别走商务升级和提前申请两条路。\n\n【来源：产品FAQ_示例.md】【来源：产品性能与容量规划FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6475,
+      "cost_cny": 0.0067,
+      "total_tokens": 2550,
+      "error": null
+    },
+    {
+      "id": 24,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品交付与售后FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品交付与售后FAQ_示例.md",
+        "技术支持与工单流程FAQ_示例.md",
+        "产品性能与容量规划FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "数据迁移",
+        "培训",
+        "验收"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据知识库中的产品交付 FAQ，情况如下：\n\n交付周期\n- 标准私有化实施周期为 4~6 周，包含环境部署、数据迁移、与客户系统对接及用户培训。\n- 远程交付为默认方式；客户有需求可安排现场支持，现场实施按天计费并另行报价。\n\n交付流程（四步）\n- 第 1 周：需求确认与清单对齐\n- 第 2 周：环境准备与安装\n- 第 3~4 周：数据迁移与系统对接\n- 第 5~6 周：验收测试与培训上线\n- 客户需在验收单上签字确认，签字后进入质保期。\n\n补充说明\n- 若先走 POC：面向潜在客户提供 30 天免费 POC 环境，正式签约后 POC 环境可无缝转为生产环境。\n- 上线前建议做一次压测，压测报告可作为扩容依据；生产环境建议至少三节点集群以消除单点。\n\n【来源：产品交付与售后FAQ_示例.md】【来源：产品性能与容量规划FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6658,
+      "cost_cny": 0.0067,
+      "total_tokens": 2446,
+      "error": null
+    },
+    {
+      "id": 25,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品交付与售后FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "值班与应急值班安排_示例.md",
+        "技术支持与工单流程FAQ_示例.md",
+        "产品交付与售后FAQ_示例.md",
+        "产品升级与版本发布FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "7×24",
+        "1小时"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "关于半夜（夜间）系统故障多久有人处理，知识库里的规则如下：\n\n- 服务保障：提供 7×24 小时监控告警，夜间同样有值班待命（值班指法定节假日、周末及夜间的现场或远程待命）。\n- 响应时效：普通工单在工作时间 4 小时内响应；严重故障（核心功能不可用）1 小时内响应，并每 30 分钟同步一次处理进展。\n- 故障分级：按影响范围与业务损失分为 P1–P4 四级，P1 为核心业务不可用，P2 为主要功能受损，P3 为部分功能异常，P4 为咨询与优化建议；分级由值班工程师确认。\n- 升级机制：超时未响应的自动升级至技术支持主管；客户超时未获响应可发起升级投诉，区域负责人 2 小时内介入。\n- 提单渠道：生产故障请优先走服务热线，以便第一时间触发值班响应（也可通过工单系统、客户成功经理提单）。\n- 注意：各级别的具体响应时效与升级路径以服务协议/合同 SLA 约定为准，知识库中未给出各等级逐条的具体分钟数。\n\n另外，值班本身不等同于加班：值班期间未实际处理事务的不计入调休池；值班期间实际工作超过 2 小时的部分，按加班流程另行申请。\n\n【来源：值班与应急值班安排_示例.md】【来源：技术支持与工单流程FAQ_示例.md】【来源：产品交付与售后FAQ_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7443,
+      "cost_cny": 0.009,
+      "total_tokens": 3211,
+      "error": null
+    },
+    {
+      "id": 26,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品交付与售后FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品升级与版本发布FAQ_示例.md",
+        "产品计费与订阅FAQ_示例.md",
+        "产品交付与售后FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "14天",
+        "兼容性评估"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "会通知。根据知识库中的规则：\n\n- 大版本升级前 14 天会书面通知客户，并出具兼容性评估报告。\n- 升级窗口默认安排在非工作时间，支持快速回滚。\n- 涉及数据库变更的版本，会提前与客户约定维护窗口。\n- 需要停机的升级会提前在控制台公告。\n- 大版本可能调整接口行为，此类变更会通过接口变更公告提前通知，并在旧接口上保留过渡期。\n- 另外，客户可申请加入灰度名单，提前体验新版本并获得专属支持。\n\n补充说明：知识库中关于通知渠道的具体推送方式，指向了《产品交付与售后FAQ》，但该文件中未展开列出具体渠道清单，如需确认邮件/站内信等具体推送方式，建议以合同约定或客户成功经理的通知为准。\n\n【来源：产品交付与售后FAQ_示例.md】【来源：产品升级与版本发布FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6360,
+      "cost_cny": 0.0063,
+      "total_tokens": 2418,
+      "error": null
+    },
+    {
+      "id": 27,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": false,
+      "answer_cited": false,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "产品交付与售后FAQ_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "产品计费与订阅FAQ_示例.md",
+        "产品FAQ_示例.md",
+        "入职转正与离职制度_示例.md"
+      ],
+      "expected_keywords": [
+        "30天",
+        "POC"
+      ],
+      "keyword_coverage": 0.5,
+      "keyword_missed": [
+        "POC"
+      ],
+      "answer": "有的，产品支持试用。\n\n- 注册后即可开通试用，试用期的具体时长和可用功能范围以官网公示为准。\n- 试用期内转为正式订阅的，试用期间产生的配置与数据可以保留，不会白折腾。\n- 如果是私有化部署验证，单机试用版配置要求不高：4 核 8G 一台即可，适合功能验证与小型场景，环境需 Linux（CentOS 7+ / Ubuntu 20.04+）与 Docker 20.10+。\n- 需要注意：试用版到期后数据保留 30 天，期间可随时导出为 JSON/CSV，建议到期前先导出备份。\n\n【来源：产品计费与订阅FAQ_示例.md】【来源：产品FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6707,
+      "cost_cny": 0.0067,
+      "total_tokens": 2737,
+      "error": null
+    },
+    {
+      "id": 28,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "IT与账号管理制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "账号权限与访问审批流程_示例.md",
+        "IT与账号管理制度_示例.md",
+        "入职转正与离职制度_示例.md"
+      ],
+      "expected_keywords": [
+        "冻结",
+        "30天"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "关于离职同事的账号停用时间，制度规定如下：\n\n- 员工离职当日，IT 回收并冻结全部账号（企业邮箱、OA、业务系统）。\n- 离职满 30 天后，账号彻底注销。\n- 离职最后一天需完成资产归还（设备、门禁卡、工牌）、账号注销与离职面谈。\n- 外包与实习人员账号到期即停用，如需延期须重新审批。\n\n也就是说，账号是\"当天冻结、满 30 天注销\"两个节点，冻结后即无法登录使用。\n\n【来源：IT与账号管理制度_示例.md】【来源：账号权限与访问审批流程_示例.md】【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6479,
+      "cost_cny": 0.0066,
+      "total_tokens": 2720,
+      "error": null
+    },
+    {
+      "id": 29,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "IT与账号管理制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "账号权限与访问审批流程_示例.md",
+        "IT与账号管理制度_示例.md",
+        "产品交付与售后FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "12位",
+        "90天"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "公司对密码的要求如下：\n\n- 更换周期：每 90 天更换一次，且新密码不得与历史 5 次密码重复。\n- 复杂度：至少 12 位，须同时包含大小写字母、数字与特殊字符；禁止使用姓名、生日等易猜组合。\n- 相关登录安全：默认开启二次验证；账号连续输错 5 次将被锁定 30 分钟，可通过直属主管提交解锁工单。\n- 其他：访问公司系统须通过统一身份认证，禁止共享账号。\n\n【来源：IT与账号管理制度_示例.md】【来源：账号权限与访问审批流程_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5938,
+      "cost_cny": 0.0063,
+      "total_tokens": 2616,
+      "error": null
+    },
+    {
+      "id": 30,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "IT与账号管理制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "IT与账号管理制度_示例.md",
+        "信息安全与数据分级制度_示例.md",
+        "产品数据导入导出FAQ_示例.md",
+        "等保与合规认证FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "禁止",
+        "加密通道"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "不可以。按公司现行制度，把客户报表发到个人邮箱带回家属于明确禁止的行为。\n\n主要依据：\n- 客户名单、合同金额、个人身份信息等属于秘密级及以上数据，任何情况下不得存储于个人设备或公共网盘。\n- 数据外发一律走公司加密通道，禁止使用个人邮箱、网盘或即时通讯工具传输敏感数据；秘密级及以上数据对外提供还须经数据Owner与法务双重审批并留痕。\n- 导出客户数据、财务数据须经直属主管与数据负责人双重审批，导出记录留痕；客户敏感数据原则上只允许\"内网查看、加密下载\"，禁止明文留存到本地个人设备。\n- 违反者按《员工手册》保密与廉洁条款处理；造成数据泄露的，按情节给予处分直至解除劳动合同，涉嫌犯罪的移交司法机关。数据访问与导出行为全程留痕并定期审计。\n\n如果确实需要在家继续处理，建议走合规路径：\n- 先向直属主管和数据负责人申请导出审批，说明用途与范围。\n- 通过公司统一的数据交换平台或加密通道传输，不要用个人邮箱。\n- 使用公司配发且开启全盘加密的终端；涉密岗位设备禁止外带，确需携带外出须另行申请并全程开启磁盘加密。\n- 外发文件默认加水印；超过 100MB 的大文件外发还须经信息安全组评估。\n\n【来源：信息安全与数据分级制度_示例.md】【来源：IT与账号管理制度_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7139,
+      "cost_cny": 0.0099,
+      "total_tokens": 3684,
+      "error": null
+    },
+    {
+      "id": 31,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "IT与账号管理制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "软件正版化与IT资产管理办法_示例.md",
+        "IT与账号管理制度_示例.md",
+        "入职转正与离职制度_示例.md"
+      ],
+      "expected_keywords": [
+        "交还",
+        "清除"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "需要归还。\n\n- 公司配发的电脑、显示器、加密盘等资产都登记在个人名下，离职时须交还全部设备。\n- 归还时间：在最后工作日前完成，由 IT 与行政共同验收；同时配合 IT 清除本地缓存与数据。\n- 归还完成才能办理离职手续与结算（离职最后一天还要一并归还门禁卡、工牌并注销账号）。\n- 如果设备人为损坏或遗失，按购置价折价（折旧后残值）赔偿。\n\n【来源：软件正版化与IT资产管理办法_示例.md】【来源：IT与账号管理制度_示例.md】【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5754,
+      "cost_cny": 0.0066,
+      "total_tokens": 2703,
+      "error": null
+    },
+    {
+      "id": 32,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "入职转正与离职制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "入职转正与离职制度_示例.md",
+        "实习生与劳务派遣管理办法_示例.md",
+        "晋升与内部转岗制度_示例.md"
+      ],
+      "expected_keywords": [
+        "3天",
+        "书面"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "试用期主动离职的规定如下：\n\n- 试用期员工离职须提前 3 天书面提出（正式员工为提前 30 天）。\n- 试用期内主动离职的，按正式离职流程办理，但无需提前 30 天。\n- 离职须完成交接清单，并由直属主管与接手人双人确认；未完成交接不办理离职结算。\n- 离职最后一天需完成资产归还（设备、门禁卡、工牌）、账号注销与离职面谈。\n- 薪资与年假折算在离职流程全部完成后，于次月发薪日一并结清。\n\n另外提醒：如果是实习生或劳务派遣等非正式用工人员，不适用上述员工离职规则，按实习协议或派遣单位规定办理。\n\n【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6035,
+      "cost_cny": 0.0065,
+      "total_tokens": 2579,
+      "error": null
+    },
+    {
+      "id": 33,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "入职转正与离职制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "入职转正与离职制度_示例.md",
+        "晋升与内部转岗制度_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "7个工作日",
+        "360度"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据公司制度，转正相关规则如下：\n\n提交时间\n- 转正须提前 7 个工作日提交转正申请。\n\n评审方式\n- 经直属主管面谈，并进行 360 度评分。\n- 评审通过后，转正于次月生效。\n\n相关背景（试用期安排）\n- 试用期 1~6 个月，依据合同期限确定（合同 3 年以上最长 6 个月）。\n- 试用期内设两次考核节点：第 1 个月末目标对齐、第 3 个月末试用中期评估。\n- 试用期内被证明不符合录用条件的，公司提前 3 日书面通知解除。\n\n另外提醒一点：转正流程与晋升评审不是同一套流程，不能相互替代。\n\n【来源：入职转正与离职制度_示例.md】【来源：晋升与内部转岗制度_示例.md】\n\n如果你需要，我可以帮你查一下你个人的转正/试用期状态，请告诉我你的姓名。",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6414,
+      "cost_cny": 0.0071,
+      "total_tokens": 2709,
+      "error": null
+    },
+    {
+      "id": 34,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "入职转正与离职制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "入职转正与离职制度_示例.md",
+        "考勤与打卡管理办法_示例.md",
+        "实习生与劳务派遣管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "1个月",
+        "当月"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据公司制度，这两项的规定如下：\n\n- 劳动合同签订：最晚于入职后 1 个月内签订，试用期包含在合同期内。\n- 社保缴纳：社会保险与公积金自入职当月开始缴纳。\n\n另外提醒两点相关事项：\n- 新员工须在入职 3 个工作日内提交银行卡信息与体检报告，未及时提交会影响当月薪资发放。\n- 入职材料（身份证、学历证明、离职证明、体检报告）缺一不可，材料不齐的须在入职后 1 周内补齐。\n\n【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6042,
+      "cost_cny": 0.0063,
+      "total_tokens": 2605,
+      "error": null
+    },
+    {
+      "id": 35,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "入职转正与离职制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "竞业限制与保密协议实施办法_示例.md",
+        "入职转正与离职制度_示例.md",
+        "实习生与劳务派遣管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "竞业限制",
+        "2年"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "竞业限制的适用对象和期限，制度里是这样规定的：\n\n适用对象\n- 竞业限制只对签署了专项竞业限制协议的人员生效，未签署专项协议的人员不承担竞业限制义务。\n- 通常覆盖三类人：高级管理人员、高级技术人员、其他负有保密义务的人员。\n- 具体签署名单由人力资源部确定，并在协议中列明。\n- 另外，离职制度中提到核心岗位离职后须遵守竞业限制协议。\n\n限制期限\n- 一般不超过 2 年。\n\n几点补充说明\n- 竞业限制期内公司按月支付经济补偿；逾期未支付达到约定期限的，员工可主张解除竞业限制。\n- 违反约定的按协议承担违约责任。\n- 公司可在员工离职时或竞业限制期内书面通知放弃竞业限制要求，自通知送达之日起停止支付补偿。\n- 注意区分保密义务：全体在职员工都负有保密义务，且保密义务不因离职而终止、不设期限上限、无需支付补偿；竞业限制则必须支付补偿且有明确期限，两者不可互相替代。\n\n【来源：竞业限制与保密协议实施办法_示例.md】【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6481,
+      "cost_cny": 0.0074,
+      "total_tokens": 2728,
+      "error": null
+    },
+    {
+      "id": 36,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "薪酬与绩效制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "薪酬与绩效制度_示例.md",
+        "员工手册_示例.md",
+        "薪酬结构与个税申报说明_示例.md"
+      ],
+      "expected_keywords": [
+        "10日",
+        "提前"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "关于发薪时间的规定如下：\n\n- 发薪日：每月 10 日发放上月工资。\n- 遇节假日：遇法定节假日提前至最近的工作日发放，不推迟。\n- 新员工：入职当月按实际出勤天数折算发放。\n- 工资条：每月可在 OA 自助查询，包含各项构成与个税代扣明细。\n- 补充提示：薪资明细通过薪酬系统推送，如对明细有疑问，应在收到后 5 个工作日内提出。\n\n【来源：薪酬与绩效制度_示例.md】【来源：薪酬结构与个税申报说明_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5908,
+      "cost_cny": 0.0063,
+      "total_tokens": 2625,
+      "error": null
+    },
+    {
+      "id": 37,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "薪酬与绩效制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "绩效改进与申诉办法_示例.md",
+        "薪酬与绩效制度_示例.md",
+        "绩效系数对照表.xlsx"
+      ],
+      "expected_keywords": [
+        "季度",
+        "五档"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "绩效考核的评定规则如下：\n\n评定方式\n- 考核频率：每季度一次。\n- 流程：由直属主管初评，经部门校准会统一拉齐后生效。\n\n档位划分（共五档）\n- S：年度卓越，超出期望，绩效系数 1.5\n- A：超出期望，绩效系数 1.2\n- B：符合期望，绩效系数 1.0\n- C：需改进，触发关注，绩效系数 0.6\n- D：不合格，进入改进计划，绩效系数 0\n\n结果应用\n- 连续两季度评为 C，或任一季度评为 D，触发绩效改进计划（PIP），周期 2 个月，期满由主管与人力复评决定去留。\n- 年终奖 = 基数 × 绩效系数 ×（当年在职月数 ÷ 12），随次年 1 月工资发放；发放日前离职不享受当年年终奖。\n- 年度调薪窗口为每年 3 月，依据上一自然年度绩效等级确定幅度；绩效为 C 及以下原则上不调薪。\n\n对结果有异议\n- 可在结果公示后 5 个工作日内向人力资源部提交书面申诉，附佐证材料；人力资源部组织复核，必要时召集业务负责人与 HR 组成复核小组，复核应在收到申诉后 10 个工作日内完成并书面反馈，复核期间不影响当期薪酬发放。\n\n【来源：薪酬与绩效制度_示例.md】【来源：绩效系数对照表.xlsx】【来源：绩效改进与申诉办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 7229,
+      "cost_cny": 0.0073,
+      "total_tokens": 2453,
+      "error": null
+    },
+    {
+      "id": 38,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "薪酬与绩效制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "绩效系数对照表.xlsx",
+        "薪酬与绩效制度_示例.md",
+        "绩效改进与申诉办法_示例.md"
+      ],
+      "expected_keywords": [
+        "PIP",
+        "2个月"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "连续两季度绩效评为 C 的处理规则如下：\n\n- 触发绩效改进计划（PIP）：按《薪酬与绩效制度》，连续两季度评为 C，或任一季度评为 D，都会触发绩效改进计划（PIP）。\n- PIP 周期与结果：改进计划周期为 2 个月，期满由直属主管与人力资源复评，决定去留。\n- 改进期支持：按《绩效改进与申诉办法》，改进期内公司提供必要的培训与资源支持，改进目标、辅导方式与观察周期由主管与员工共同制定，并报人力资源部备案。\n- 绩效系数影响：C 档绩效系数为 0.6（S 1.5、A 1.2、B 1.0、C 0.6、D 0），会影响年终奖计算（年终奖 = 基数 × 绩效系数 × 当年在职月数 ÷ 12）。\n- 调薪影响：年度调薪窗口为每年 3 月，绩效为 C 及以下原则上不调薪。\n- 申诉渠道：如对考核结果有异议，可在结果公示后 5 个工作日内向人力资源部提交书面申诉并附佐证材料；人力资源部组织复核，10 个工作日内书面反馈，复核期间不影响当期薪酬发放。\n\n【来源：薪酬与绩效制度_示例.md】【来源：绩效系数对照表.xlsx】【来源：绩效改进与申诉办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6105,
+      "cost_cny": 0.0069,
+      "total_tokens": 2399,
+      "error": null
+    },
+    {
+      "id": 39,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "薪酬与绩效制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "薪酬与绩效制度_示例.md",
+        "绩效系数对照表.xlsx",
+        "员工福利与体检制度_示例.md"
+      ],
+      "expected_keywords": [
+        "绩效系数",
+        "在职月数"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "年终奖的计算和离职相关规则，资料中有明确规定：\n\n计算方式\n- 年终奖 = 基数 × 绩效系数 ×（当年在职月数 ÷ 12）\n- 也就是说，它同时和你的年度绩效等级、当年在职月数挂钩，不是固定金额。\n\n绩效系数（按年度绩效等级）\n- S 档：1.5\n- A 档：1.2\n- B 档：1.0\n- C 档：0.6\n- D 档：0\n\n发放时间\n- 年终奖随次年 1 月工资一并发放。\n\n年底前离职还有没有\n- 没有。制度明确：发放日前离职的，不享受当年年终奖。\n- 由于年终奖是随次年 1 月工资发放，所以只要在发放日之前离职，当年年终奖就不予发放。\n\n补充说明\n- 绩效等级由季度考核评定（S/A/B/C/D 五档），由直属主管初评、部门校准会拉齐后生效，年度绩效等级会影响年终奖系数。\n- 制度中未写明\"基数\"的具体口径（如是否为月薪、哪一部分），这部分资料中没有，建议向人力资源部确认。\n\n【来源：薪酬与绩效制度_示例.md】【来源：绩效系数对照表.xlsx】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6960,
+      "cost_cny": 0.0069,
+      "total_tokens": 2428,
+      "error": null
+    },
+    {
+      "id": 40,
+      "difficulty": null,
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "薪酬与绩效制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "薪酬与绩效制度_示例.md",
+        "晋升与内部转岗制度_示例.md",
+        "入职转正与离职制度_示例.md"
+      ],
+      "expected_keywords": [
+        "3月",
+        "晋升"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据知识库中的制度，关于调薪的安排如下：\n\n- 年度调薪窗口：每年 3 月，依据上一自然年度绩效等级确定调薪幅度。\n- 调薪次数：原则上每年只有这一次调薪机会；绩效为 C 及以下原则上不调薪。\n- 例外情况：晋升带来的调薪随晋升评审即时生效，不受年度窗口限制。\n- 保密要求：年度调薪幅度仅本人与人力知悉，不得相互打听。\n\n另外提醒一点，知识库中不同文件对晋升窗口的表述不完全一致：《薪酬与绩效制度》提到晋升调薪随晋升评审即时生效；《入职转正与离职制度》写的是\"晋升一年设两次窗口\"，而《晋升与内部转岗制度》写的是\"晋升评审原则上每年组织\"。如果你关心的是晋升窗口次数，建议以人力部门的正式通知为准，或向 HR 确认。\n\n【来源：薪酬与绩效制度_示例.md】【来源：晋升与内部转岗制度_示例.md】【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6839,
+      "cost_cny": 0.0071,
+      "total_tokens": 2718,
+      "error": null
+    },
+    {
+      "id": 41,
+      "difficulty": "多跳",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": null,
+      "expected_sources": [
+        "员工手册_示例.md",
+        "值班与应急值班安排_示例.md"
+      ],
+      "retrieved_sources": [
+        "员工手册_示例.md",
+        "实习生与劳务派遣管理办法_示例.md",
+        "值班与应急值班安排_示例.md"
+      ],
+      "expected_keywords": [
+        "3个月",
+        "不等同于加班"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "两个问题在制度里都有明确规定，回答如下：\n\n调休清零期限\n- 加班补偿统一进\"调休池\"，不折算加班费。工作日加班按 1.5 倍调休、法定节假日加班按 2 倍调休计入。\n- 调休需在 3 个月内用完，逾期清零。\n- 调休申请走 OA，审批通过后可选任意工作日调休。\n- 补充：加班需提前在 OA 提交申请（写明原因与预估时长，由直属主管审批）；紧急突发情况可先执行后补单，补单须在 24 小时内完成。\n\n节假日值班是否算加班\n- 值班不等同于加班。值班指在法定节假日、周末及夜间为保障系统与业务连续性而安排的现场或远程待命；值班期间未实际处理事务的，不计入调休池。\n- 值班按日发放值班补贴，标准按是否现场、是否夜间分档。\n- 但值班期间实际发生工作且超过 2 小时的，该部分时长单独统计，按加班流程另行申请，这部分才可能进调休池。\n\n另外提醒一点适用范围：上述调休池规则适用于正式员工。实习生、劳务派遣、退休返聘等非正式用工人员不适用《员工手册》的加班调休池规则，其加班时长按协议折算为补贴，不累积调休、不设调休有效期。\n\n如果你想知道自己当前的调休余额或某笔加班是否已入池，请告诉我你的姓名，我再帮你查个人数据。\n\n【来源：员工手册_示例.md】【来源：值班与应急值班安排_示例.md】【来源：实习生与劳务派遣管理办法_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7537,
+      "cost_cny": 0.0103,
+      "total_tokens": 3797,
+      "error": null
+    },
+    {
+      "id": 42,
+      "difficulty": "多跳",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": null,
+      "expected_sources": [
+        "实习生与劳务派遣管理办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "retrieved_sources": [
+        "实习生与劳务派遣管理办法_示例.md",
+        "值班与应急值班安排_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "不适用",
+        "1.5倍"
+      ],
+      "keyword_coverage": 0.5,
+      "keyword_missed": [
+        "不适用"
+      ],
+      "answer": "两个问题在制度里都有明确答案：\n\n实习生加班能否进调休池\n- 不能。实习生属于\"非正式用工人员\"（含在校实习生、劳务派遣人员、退休返聘人员），与公司不构成劳动关系。\n- 《实习生与劳务派遣管理办法》明确排除《员工手册》的加班调休池规则：实习生加班时长按实习协议约定的标准折算为实习补贴，不累积调休、不设调休有效期，也不参与离职时的调休清算。\n- 该办法是通用员工规则的明确排除条款，适用时以该办法为准。\n\n正式员工加班折算倍数\n- 加班补偿统一进\"调休池\"，不折算加班费。\n- 工作日加班：按 1.5 倍调休计入。\n- 法定节假日加班：按 2 倍调休计入。\n- 补充要点：加班需提前在 OA 提交申请（写明原因与预估时长）由直属主管审批，紧急情况可先执行后补单，补单须在 24 小时内完成；调休需在 3 个月内用完，逾期清零，调休申请同样走 OA。\n\n另外提醒一点容易混淆的：值班不等同于加班，值班期间未实际处理事务的不计入调休池；若值班期间实际工作超过 2 小时，该部分时长单独统计并按加班流程另行申请。\n\n【来源：实习生与劳务派遣管理办法_示例.md】【来源：员工手册_示例.md】【来源：值班与应急值班安排_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7093,
+      "cost_cny": 0.01,
+      "total_tokens": 3760,
+      "error": null
+    },
+    {
+      "id": 43,
+      "difficulty": "多跳",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": null,
+      "expected_sources": [
+        "产品FAQ_示例.md",
+        "信息安全与数据分级制度_示例.md"
+      ],
+      "retrieved_sources": [
+        "信息安全与数据分级制度_示例.md",
+        "产品FAQ_示例.md",
+        "产品数据导入导出FAQ_示例.md",
+        "技术支持与工单流程FAQ_示例.md",
+        "等保与合规认证FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "TLS 1.2",
+        "秘密级"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "两个问题分别对应两份资料，答案如下。\n\n加密（产品侧技术实现）\n- 传输层：全部走 TLS 1.2+。\n- 存储层：使用 AES-256 加密落盘，密钥由客户托管或平台 KMS 托管，客户可选；另支持客户自带证书（BYOC）与国密 SM4 存储加密选项。\n- 配套措施：日志不记录明文请求体，脱敏后的审计日志仅保留 180 天。\n\n客户名单的内部定级\n- 公司数据按敏感程度分为公开、内部、秘密、绝密四级。\n- 客户名单属于秘密级及以上，任何情况下不得存储于个人设备或公共网盘。\n- 连带规则：秘密级及以上数据对外提供须经数据 Owner 与法务双重审批并留存记录；对外传输优先使用公司统一数据交换平台，禁止用个人邮箱、即时通讯工具传输。\n\n【来源：产品FAQ_示例.md】【来源：信息安全与数据分级制度_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 6673,
+      "cost_cny": 0.0084,
+      "total_tokens": 3265,
+      "error": null
+    },
+    {
+      "id": 44,
+      "difficulty": "多跳",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": null,
+      "expected_sources": [
+        "产品FAQ_示例.md",
+        "产品数据导入导出FAQ_示例.md"
+      ],
+      "retrieved_sources": [
+        "产品数据导入导出FAQ_示例.md",
+        "产品计费与订阅FAQ_示例.md",
+        "产品FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "30天",
+        "行数上限"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "订阅到期后的数据导出，以及导出任务本身的限制，资料里是这样规定的：\n\n到期后还能不能导出\n- 客户数据的归属权属于客户，服务期内可随时导出。\n- 试用版到期后：数据保留 30 天，期间可随时导出为 JSON/CSV。\n- 正式版到期未续费：保留 60 天后清空，导出窗口与试用版相同（即这 60 天内可导出）。\n- 到期后先进入宽限期，宽限期内只读可用；宽限期结束后按数据保留规则处理。\n- 账号删除后，关联的检索索引与缓存数据在 24 小时内同步清理。\n\n导出任务本身的限制\n- 大批量导出以后台任务方式执行，任务完成后通过站内信通知下载。\n- 单个导出任务有行数上限；超过上限的建议按时间范围分批导出，或改用增量接口。\n- 导出格式：结构化数据默认 CSV（UTF-8 带 BOM，便于 Excel 直接打开）与 JSON 两种；报表类可导出 Excel。\n- 具体可导出范围与当前订阅版本有关。\n- 敏感操作（导数据、删库、改权限）均记录审计日志并支持导出。\n\n需要提醒的是：资料中只写了\"单个导出任务有行数上限\"，但没有给出具体上限数值，这部分资料中没有。\n\n【来源：产品数据导入导出FAQ_示例.md】【来源：产品计费与订阅FAQ_示例.md】【来源：产品FAQ_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 7020,
+      "cost_cny": 0.0076,
+      "total_tokens": 2682,
+      "error": null
+    },
+    {
+      "id": 45,
+      "difficulty": "冲突",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "实习生与劳务派遣管理办法_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "实习生与劳务派遣管理办法_示例.md",
+        "婚育假与育儿假实施办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "不享有年假"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "实习生不享有年假。\n\n- 年假是员工专属假期：《员工手册》规定，正式员工入职满一年后每年享有带薪年假 10 天。\n- 实习生属于\"非正式用工人员\"：《实习生与劳务派遣管理办法》明确，实习生与公司不构成劳动关系，签署实习协议；实习生按学校安排享有寒暑假，不享有年假、婚育假等员工专属假期。\n- 同理，非正式用工人员也不适用《员工手册》的加班调休池规则，其加班时长按实习协议约定折算为实习补贴，不累积调休。\n- 补充：实习生毕业后入职的，实习生阶段不计入试用期，试用期自入职之日起重新计算。\n\n【来源：实习生与劳务派遣管理办法_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 31477,
+      "cost_cny": 0.0064,
+      "total_tokens": 2554,
+      "error": null
+    },
+    {
+      "id": 46,
+      "difficulty": "冲突",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "差旅与出差管理办法_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "差旅与出差管理办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "当地货币限额"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "境外出差的住宿费报销标准如下：\n\n- 境外住宿按当地货币限额执行，由财务按下榻城市的商务酒店均价每半年核定一次，不适用境内\"一城一价\"的标准（即不套用境内一线城市 500 元/晚、其他城市 350 元/晚的标准）。\n- 具体限额需以财务当期核定的下榻城市商务酒店均价为准，建议出差前向财务确认目的地城市的当期限额。\n- 境外餐补按实际出差天数发放，不以发票实报。\n- 境外差旅保险由公司统一购买，个人不得自行加购后报销。\n- 流程上，境外出差除 OA 出差申请（事由、行程、预算、随行人员，经直属主管审批）外，还需财务与法务会签，并提前 10 个工作日提交。\n\n【来源：差旅与出差管理办法_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6175,
+      "cost_cny": 0.007,
+      "total_tokens": 2713,
+      "error": null
+    },
+    {
+      "id": 47,
+      "difficulty": "冲突",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "账号权限与访问审批流程_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "IT与账号管理制度_示例.md",
+        "账号权限与访问审批流程_示例.md",
+        "入职材料清单.pdf",
+        "入职转正与离职制度_示例.md"
+      ],
+      "expected_keywords": [
+        "重新审批"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "外包人员账号到期后如需继续使用，按制度需要重新走审批，不能自动续期。\n\n- 外包与实习人员账号到期即停用，如需延期须重新审批（来源：账号权限与访问审批流程_示例.md）。\n- 临时外包人员账号有效期与合同一致，最长不超过 12 个月，到期自动失效（来源：IT与账号管理制度_示例.md）。\n- 账号开通/延期走工单流程：HR 发起 → 部门主管确认岗位模板 → IT 开通并邮件通知（来源：IT与账号管理制度_示例.md）。\n- 权限按最小必要原则授予，业务系统权限由系统 Owner 审批（来源：账号权限与访问审批流程_示例.md）。\n\n所以实际操作建议是：先确认外包合同是否已续签（账号有效期与合同一致），再由 HR 发起工单、部门主管确认岗位模板、IT 开通，业务系统权限另需对应系统 Owner 审批。\n\n需要提醒的是，知识库中只写了\"须重新审批\"，没有给出延期申请的具体表单名称、审批时限或可延期的最长天数，这部分资料中没有。\n\n【来源：IT与账号管理制度_示例.md；账号权限与访问审批流程_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 6565,
+      "cost_cny": 0.0095,
+      "total_tokens": 3707,
+      "error": null
+    },
+    {
+      "id": 48,
+      "difficulty": "冲突",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "发票与税务合规指引_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "发票与税务合规指引_示例.md",
+        "员工手册_示例.md",
+        "培训与认证补贴制度_示例.md"
+      ],
+      "expected_keywords": [
+        "90"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "发票开具后须在 90 个自然日内提交报销，超过时限的原则上不予受理；确有特殊原因的，须由财务负责人审批。\n\n补充几点相关规则：\n- 跨年发票按《员工手册》报销条款执行：原则上不予受理，但 12 月发生的发票除外。\n- 报销单按月提交。\n- 发票抬头须为公司全称，且需通过税务平台查验真伪，查验不通过的会被退回。\n- 发票丢失的，可提供商户开具的发票复印件加盖章，或银行流水加情况说明，经财务审批后按 80% 报销；金额超过 2000 元的丢失发票还须部门负责人签字确认。\n\n【来源：发票与税务合规指引_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5928,
+      "cost_cny": 0.0061,
+      "total_tokens": 2385,
+      "error": null
+    },
+    {
+      "id": 49,
+      "difficulty": "应拒答",
+      "refusal_case": true,
+      "answer_nonempty": true,
+      "citation_covered": false,
+      "answer_cited": false,
+      "refusal_ok": true,
+      "refusal_fabricated": [],
+      "must_not_contain": [
+        "行权价",
+        "授予价格",
+        "期权池"
+      ],
+      "expected_source": null,
+      "expected_sources": null,
+      "retrieved_sources": [
+        "绩效改进与申诉办法_示例.md",
+        "绩效系数对照表.xlsx",
+        "弹性工作与远程办公管理办法_示例.md",
+        "合同评审与用印管理办法_示例.md",
+        "薪酬结构与个税申报说明_示例.md",
+        "员工福利与体检制度_示例.md",
+        "账号权限与访问审批流程_示例.md",
+        "薪酬与绩效制度_示例.md"
+      ],
+      "expected_keywords": [],
+      "keyword_coverage": 0.0,
+      "keyword_missed": [],
+      "answer": "我检索了知识库中与股权激励、期权、长期激励相关的制度文件，结论如下：\n\n资料中没有关于员工股权激励或期权计划的内容。\n\n具体说明：\n- 知识库中涉及薪酬与激励的文件（《薪酬与绩效制度》《薪酬结构与个税申报说明》《绩效系数对照表》《员工福利与体检制度》）只覆盖了月薪构成、季度绩效评定、年终奖、年度调薪、补贴与体检福利等，均未提及股权激励、期权、员工持股或行权安排。\n- 因此关于\"是否有股权激励/期权计划\"以及\"如何行权\"，知识库中没有可依据的规则，我不能凭空作答。\n\n建议：\n- 这类长期激励安排通常以劳动合同约定、单独的授予协议或公司当年公示为准，可向人力资源部（薪酬组）或你的直属主管确认。\n- 如果你手上有具体的授予协议或期权文件，可以发给我，我帮你对照知识库中相关制度（如薪酬保密、个税申报）做解读。\n\n【来源：薪酬与绩效制度_示例.md】【来源：薪酬结构与个税申报说明_示例.md】【来源：员工福利与体检制度_示例.md】【来源：绩效系数对照表.xlsx】",
+      "tool_calls": 4,
+      "llm_calls": 3,
+      "duration_ms": 11721,
+      "cost_cny": 0.0154,
+      "total_tokens": 6329,
+      "error": null
+    },
+    {
+      "id": 50,
+      "difficulty": "应拒答",
+      "refusal_case": true,
+      "answer_nonempty": true,
+      "citation_covered": false,
+      "answer_cited": false,
+      "refusal_ok": true,
+      "refusal_fabricated": [],
+      "must_not_contain": [
+        "入托",
+        "学费报销"
+      ],
+      "expected_source": null,
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工福利与体检制度_示例.md",
+        "培训与认证补贴制度_示例.md",
+        "婚育假与育儿假实施办法_示例.md",
+        "薪酬结构与个税申报说明_示例.md"
+      ],
+      "expected_keywords": [],
+      "keyword_coverage": 0.0,
+      "keyword_missed": [],
+      "answer": "根据现有资料，没有找到公司提供托儿所或子女入学补贴的规定。\n\n与育儿相关的可查内容如下：\n\n- 育儿假：子女满三周岁前，符合条件的员工每年可享受育儿假，按子女数量分别计算；当年有效，不结转、不折现。\n- 哺乳时间：哺乳期女员工每天享有哺乳时间，可合并使用，也可折算为延迟到岗或提前离岗，具体与直属主管协商。\n- 产假与陪产假：女员工产假按当地人口与计划生育条例执行，难产、多胞胎按规定顺延；男员工陪产假在配偶分娩后连续使用，不得拆分。\n- 个税专项附加扣除：子女教育等专项附加扣除需员工本人在个人所得税 App 自行填报，公司仅按填报结果申报，不代为判断扣除资格。这属于税务扣除，不是公司发放的补贴。\n\n关于托儿所、子女入学补贴这类福利，资料中没有记载。按《员工福利与体检制度》的兜底条款，制度未列明的福利项目以劳动合同约定与公司当年公示为准，建议向人力资源部或行政部确认。\n\n【来源：婚育假与育儿假实施办法_示例.md】【来源：员工福利与体检制度_示例.md】【来源：薪酬结构与个税申报说明_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7649,
+      "cost_cny": 0.0086,
+      "total_tokens": 3163,
+      "error": null
+    },
+    {
+      "id": 51,
+      "difficulty": "应拒答",
+      "refusal_case": true,
+      "answer_nonempty": true,
+      "citation_covered": false,
+      "answer_cited": false,
+      "refusal_ok": true,
+      "refusal_fabricated": [],
+      "must_not_contain": [
+        "贷款额度",
+        "免息额度"
+      ],
+      "expected_source": null,
+      "expected_sources": null,
+      "retrieved_sources": [
+        "薪酬结构与个税申报说明_示例.md",
+        "弹性工作与远程办公管理办法_示例.md",
+        "实习生与劳务派遣管理办法_示例.md",
+        "员工福利与体检制度_示例.md",
+        "软件正版化与IT资产管理办法_示例.md"
+      ],
+      "expected_keywords": [],
+      "keyword_coverage": 0.0,
+      "keyword_missed": [],
+      "answer": "根据知识库检索结果，资料中没有关于\"员工买房可申请公司无息贷款\"的任何规定。\n\n我检索了薪酬、福利、用工等相关制度文件，涉及的内容包括薪酬构成与个税、弹性工作与远程办公、实习生与劳务派遣、员工福利与体检、IT 资产管理等，均未提及购房贷款或公司向员工提供借款的政策。\n\n需要说明的是：\n- 《员工福利与体检制度》中列明的福利为年度体检、节日与生日福利、团建经费、通讯与交通补贴等，并注明\"本制度未列明的福利项目，以劳动合同约定与公司当年公示为准\"。\n- 因此，若公司确有此类购房贷款安排，可能属于未纳入知识库的专项政策，建议直接向人力资源部或薪酬福利组确认。\n\n【来源：员工福利与体检制度_示例.md】【来源：薪酬结构与个税申报说明_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7011,
+      "cost_cny": 0.008,
+      "total_tokens": 3108,
+      "error": null
+    },
+    {
+      "id": 52,
+      "difficulty": "应拒答",
+      "refusal_case": true,
+      "answer_nonempty": true,
+      "citation_covered": false,
+      "answer_cited": false,
+      "refusal_ok": true,
+      "refusal_fabricated": [],
+      "must_not_contain": [
+        "年金缴费比例",
+        "企业缴费比例"
+      ],
+      "expected_source": null,
+      "expected_sources": null,
+      "retrieved_sources": [
+        "员工福利与体检制度_示例.md",
+        "薪酬结构与个税申报说明_示例.md",
+        "入职转正与离职制度_示例.md"
+      ],
+      "expected_keywords": [],
+      "keyword_coverage": 0.0,
+      "keyword_missed": [],
+      "answer": "根据知识库检索结果，资料中没有关于企业年金的任何规定。\n\n- 检索到的福利制度（《员工福利与体检制度》）涵盖的是年度体检、节日与生日福利、团建经费、通讯与交通补贴等项目，未提及企业年金。\n- 《薪酬结构与个税申报说明》中列明的薪酬构成为基本工资、岗位工资、绩效工资与补贴四部分，代扣代缴项目为个人所得税与社保公积金个人部分，同样没有企业年金。\n- 《入职转正与离职制度》中只提到社会保险与公积金自入职当月开始缴纳，也未涉及企业年金。\n\n该制度中还有一条兜底说明：本制度未列明的福利项目，以劳动合同约定与公司当年公示为准。因此企业年金是否缴纳，建议你查阅自己的劳动合同约定，或向人力资源部/行政部确认当年公示的福利方案。\n\n【来源：员工福利与体检制度_示例.md】【来源：薪酬结构与个税申报说明_示例.md】【来源：入职转正与离职制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6738,
+      "cost_cny": 0.0069,
+      "total_tokens": 2606,
+      "error": null
+    },
+    {
+      "id": 53,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "差旅与出差管理办法_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "差旅与出差管理办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "公司统一购买"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "境外出差的保险由公司统一购买，个人不得自行加购后报销。\n\n具体规则：\n- 境外差旅的保险由公司统一购买，个人不得自行加购后报销。\n- 境外出差需在 OA 发起出差申请，写明事由、行程、预算与随行人员，经直属主管审批；境外出差另需财务与法务会签，并提前 10 个工作日提交。\n- 境外住宿按当地货币限额执行，由财务按下榻城市的商务酒店均价每半年核定一次；境外餐补按实际出差天数发放，不以发票实报。\n\n所以如果你有额外的保险需求，建议在出差申请阶段就与主管或财务沟通，看是否能纳入公司统一安排，而不是自行购买后走报销。\n\n【来源：差旅与出差管理办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6480,
+      "cost_cny": 0.0069,
+      "total_tokens": 2715,
+      "error": null
+    },
+    {
+      "id": 54,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "业务招待费与礼品管理办法_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "业务招待费与礼品管理办法_示例.md",
+        "产品FAQ_示例.md",
+        "采购与供应商管理办法_示例.md"
+      ],
+      "expected_keywords": [
+        "市场部"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "对外赠送客户纪念品的额度核定规则如下：\n\n- 单件价值与年度累计额度由市场部核定。\n- 赠送须走统一采购渠道。\n- 赠送与收受均须在 OA 登记备查，登记信息包括对象单位、事由、物品名称与价值。\n- 未登记、瞒报或私下留用礼品礼金的，按违纪处理；金额较大或多次发生的，解除劳动合同并追偿。\n\n【来源：业务招待费与礼品管理办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5526,
+      "cost_cny": 0.0059,
+      "total_tokens": 2472,
+      "error": null
+    },
+    {
+      "id": 55,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "病假与医疗期管理制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "病假与医疗期管理制度_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "二级及以上医院"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "连续请病假 5 天，需要提交二级及以上医院的诊断证明。\n\n具体规则如下：\n- 病假须在 OA 提交申请并上传医院出具的病假证明。\n- 连续病假超过 3 天的，须提供二级及以上医院的诊断证明。你请 5 天，已超过 3 天，因此适用这一条。\n- 突发疾病可先电话或 IM 报备直属主管，返岗后 2 个工作日内补齐流程与材料。\n- 病假工资按当地最低工资标准的 80% 计发（员工手册口径；病假与医疗期制度中说明具体比例按工龄分档，由薪酬组算薪时执行）。\n\n【来源：病假与医疗期管理制度_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6634,
+      "cost_cny": 0.0067,
+      "total_tokens": 2652,
+      "error": null
+    },
+    {
+      "id": 56,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "婚育假与育儿假实施办法_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "婚育假与育儿假实施办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "一年内"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "关于婚假的时效规定如下：\n\n- 婚假须在结婚登记之日起一年内使用，逾期不补。\n- 申请时需提交结婚证复印件。\n- 婚假属于法定假期，需提前 1 周提交证明材料，申请入口与审批人同请假流程（OA 提交、直属主管审批）。\n- 婚假额度与年假互不占用，但年假结转规则仍按员工手册执行（当年未休完最多结转 3 天至次年一季度末）。\n\n简单说：一年内休完，过期作废，不能补休。\n\n【来源：婚育假与育儿假实施办法_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6346,
+      "cost_cny": 0.0065,
+      "total_tokens": 2624,
+      "error": null
+    },
+    {
+      "id": 57,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "弹性工作与远程办公管理办法_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "弹性工作与远程办公管理办法_示例.md",
+        "考勤与打卡管理办法_示例.md",
+        "员工手册_示例.md"
+      ],
+      "expected_keywords": [
+        "正常考勤时段"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "需要打卡。\n\n- 远程办公当天仍按正常考勤时段打卡（工作日默认 09:00-18:00，午休 1 小时），远程办公不改变考勤要求。\n- 远程办公须提前一天在 OA 提交申请，写明远程地点与当日工作计划，由直属主管审批；每周远程天数上限由部门设定。\n- 远程期间须保持在线并参加既定会议。\n- 因网络故障无法打卡的，按《员工手册》补卡条款提交材料（3 个工作日内通过 OA 提交补卡申请，附会议纪要、IM 记录等佐证），每月补卡不超过 3 次，且远程与现场办公的补卡次数合并计算。\n- 注意区分：外勤、出差期间无须到办公区打卡，但须在考勤系统提交外勤/出差单作为出勤凭证；远程办公不适用这一条。\n\n【来源：弹性工作与远程办公管理办法_示例.md】【来源：考勤与打卡管理办法_示例.md】【来源：员工手册_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 6139,
+      "cost_cny": 0.0068,
+      "total_tokens": 2577,
+      "error": null
+    },
+    {
+      "id": 58,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "信息安全与数据分级制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "信息安全与数据分级制度_示例.md",
+        "采购与供应商管理办法_示例.md",
+        "技术支持与工单流程FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "四级",
+        "秘密级"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "公司数据按敏感程度分为四级：公开、内部、秘密、绝密。\n\n客户名单属于秘密级及以上（制度中与合同金额、个人身份信息并列，明确为“秘密级及以上”），因此任何情况下不得存储于个人设备或公共网盘；对外提供须经数据 Owner 与法务双重审批并留存记录，传输须走公司统一数据交换平台。\n\n【来源：信息安全与数据分级制度_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5719,
+      "cost_cny": 0.0052,
+      "total_tokens": 2135,
+      "error": null
+    },
+    {
+      "id": 59,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "采购与供应商管理办法_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "采购与供应商管理办法_示例.md",
+        "合同评审与用印管理办法_示例.md",
+        "OA操作指引.docx"
+      ],
+      "expected_keywords": [
+        "营业执照",
+        "法务"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据知识库中的《采购与供应商管理办法》，新供应商准入的要求如下：\n\n需要提交的材料\n- 营业执照\n- 开票资质\n- 合规承诺\n\n审核方\n- 由采购与法务共同审核，审核通过后进入合格供应商名录。\n\n另外两点相关要求\n- 回避要求：与合作方存在利益关系的经办人须主动申报并回避。\n- 后续衔接：进入名录后，若涉及合同签署，按《合同评审与用印管理办法》走评审流程（法务、财务、业务三方并行出具意见，任一方否决则不得用印）；付款环节须凭合同、验收单与合规发票三单一致办理。\n\n【来源：采购与供应商管理办法_示例.md】【来源：合同评审与用印管理办法_示例.md】",
+      "tool_calls": 1,
+      "llm_calls": 2,
+      "duration_ms": 5998,
+      "cost_cny": 0.0057,
+      "total_tokens": 2174,
+      "error": null
+    },
+    {
+      "id": 60,
+      "difficulty": "单源",
+      "refusal_case": false,
+      "answer_nonempty": true,
+      "citation_covered": true,
+      "answer_cited": true,
+      "refusal_ok": null,
+      "refusal_fabricated": [],
+      "must_not_contain": [],
+      "expected_source": "培训与认证补贴制度_示例.md",
+      "expected_sources": null,
+      "retrieved_sources": [
+        "培训与认证补贴制度_示例.md",
+        "员工手册_示例.md",
+        "差旅与出差管理办法_示例.md",
+        "产品交付与售后FAQ_示例.md",
+        "技术支持与工单流程FAQ_示例.md"
+      ],
+      "expected_keywords": [
+        "考试费",
+        "服务期"
+      ],
+      "keyword_coverage": 1.0,
+      "keyword_missed": [],
+      "answer": "根据知识库中的《培训与认证补贴制度》，回答如下：\n\n关于考试费能否报销\n- 可以，但有条件：与岗位直接相关的职业资格认证，考试通过后公司可报销考试费与教材费，具体上限按认证级别分档。\n- 注意是\"考试通过后\"才报销，未通过的情况制度中未提及可报销。\n- 报销凭据的合规要求需参照《发票与税务合规指引》（该指引内容未在本次检索结果中，具体票据要求建议向财务确认）。\n- 另外，参加外部培训须提前在 OA 提交申请，说明课程内容、费用预算与岗位相关性，由直属主管与人力资源部审批；同一课程原则上不重复外派。\n\n关于服务期\n- 会有服务期要求：单次补贴金额达到一定标准的，公司与员工签署培训服务期协议；服务期内主动离职的，按未履行期限比例返还。\n- 制度中未写明\"一定标准\"的具体金额门槛，如需确认具体数额，建议向人力资源部核实。\n\n另外提醒一点：参加外部培训的员工还须在返岗后一定期限内组织一次内部分享，分享材料纳入公司知识库。\n\n【来源：培训与认证补贴制度_示例.md】",
+      "tool_calls": 2,
+      "llm_calls": 2,
+      "duration_ms": 7397,
+      "cost_cny": 0.0091,
+      "total_tokens": 3445,
+      "error": null
+    }
+  ]
+}
