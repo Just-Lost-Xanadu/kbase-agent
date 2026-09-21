@@ -241,7 +241,12 @@ async def main(limit: int, tag: str | None, compare: str | None) -> None:
     if tag and not limit:
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         out = REPORT_DIR / f"{tag}.json"
-        out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 结尾补一个换行，与 reanalyze() 的写法保持一致：否则跑完评测再跑一次
+        # `--reanalyze`（它会重写同一份报告）就会在 git 里留下"只差一个换行"的脏文件，
+        # 每次都这样很烦人，也让人分不清"指标真的变了"还是"只是换行"。
+        out.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         print(f"\n报告已写入: {out}")
 
     if compare and tag:
