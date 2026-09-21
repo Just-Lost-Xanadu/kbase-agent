@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from app.config import settings
@@ -37,9 +38,34 @@ class RetrievalPipeline:
     def _sidecar_path() -> Path:
         return Path(settings.chroma_path) / "chunks.jsonl"
 
+    def _load_chunks(self) -> list[dict] | None:
+        """读 sidecar 解析成分块列表；**任何解析失败都返回 None**（视为"没有可用索引"）。
+
+        为什么要吞异常而不是往上抛：`is_indexed()` 是"服务要不要自动重建索引"的唯一判据。
+        如果 sidecar 被截断（index_docs.py 中途 Ctrl-C 就是这种情况）却在这里直接抛
+        JSONDecodeError，is_indexed() 会一路 True → ensure_ready() 一路炸 → 服务对每个请求
+        都回 503，而且**永远不会触发自动重建**，只能人工介入。这与本模块承诺的
+        "索引不存在会自动建"正好相反（实测复现：sidecar 末行截断 → JSONDecodeError 常驻）。
+        所以这里的口径是：读不出来 = 没有 = 让上层去重建。
+        sidecar 现在也是原子发布的（见 index()），正常路径不会再产生半截文件。
+        """
+        try:
+            raw = self._sidecar_path().read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        chunks: list[dict] = []
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            try:
+                chunks.append(json.loads(line))
+            except json.JSONDecodeError:
+                return None
+        return chunks or None
+
     def is_indexed(self) -> bool:
         try:
-            return self._sidecar_path().exists() and self.vector_store.count() > 0
+            return self._load_chunks() is not None and self.vector_store.count() > 0
         except Exception:
             return False
 
@@ -47,11 +73,12 @@ class RetrievalPipeline:
         """懒加载已有索引；auto_index=True 时若缺失则自动建索引（首次含模型下载）。"""
         if self._ready:
             return
-        if self.is_indexed():
-            chunks = [
-                json.loads(line)
-                for line in self._sidecar_path().read_text(encoding="utf-8").splitlines()
-            ]
+        chunks = self._load_chunks()
+        if chunks:
+            if self.vector_store.count() <= 0:
+                raise RuntimeError(
+                    "索引不一致：分块清单存在但向量库为空。请重跑 python scripts/index_docs.py"
+                )
             self._bm25 = BM25Index(chunks)
             self._ready = True
             return
@@ -73,17 +100,26 @@ class RetrievalPipeline:
         source_dir = source_dir or DEFAULT_DOCS_DIR
         documents = load_documents(source_dir)
         chunks = split_documents(documents, methods=(method,))
-        self.vector_store.reset()
-        self.vector_store.add(chunks)
+        if not chunks:
+            # 明确的报错，而不是把空列表塞给 BM25Index——rank_bm25 对空语料会除零，
+            # 抛出来的 ZeroDivisionError 完全看不出是"语料是空的"。
+            raise RuntimeError(
+                f"切分结果为空（文档 {len(documents)} 篇）：检查 data/docs 下文档是否有内容"
+            )
         sidecar = self._sidecar_path()
         sidecar.parent.mkdir(parents=True, exist_ok=True)
-        sidecar.write_text(
-            "\n".join(
-                json.dumps(c, ensure_ascii=False)
-                for c in chunks
-            ),
+        # 先落临时文件再原子替换：直接把 json 一行行写进 chunks.jsonl 的话，
+        # 中途中断（Ctrl-C、磁盘满、进程被杀）会留下**半截文件**——那正是上面
+        # _load_chunks 要兜的损坏态。os.replace 在同一文件系统内是原子的：
+        # 要么看到旧文件、要么看到完整的新文件，不存在"读了一半"的中间态。
+        tmp = sidecar.with_suffix(".jsonl.tmp")
+        tmp.write_text(
+            "\n".join(json.dumps(c, ensure_ascii=False) for c in chunks),
             encoding="utf-8",
         )
+        self.vector_store.reset()
+        self.vector_store.add(chunks)
+        os.replace(tmp, sidecar)   # 向量写成功之后才发布 sidecar
         self._bm25 = BM25Index(chunks)
         self._ready = True
         print(

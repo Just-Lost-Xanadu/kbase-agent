@@ -2,12 +2,16 @@
 
 分层说明（与 scripts/eval.py 的区别）：
 - eval.py        ：检索层 Harness（离线、零成本、快），测 top-k 是否命中真值来源。
-- eval_e2e.py    ：Agent 层 Harness（真实调 DeepSeek），四个维度：
+- eval_e2e.py    ：Agent 层 Harness（真实调 DeepSeek），五个维度：
                    ① answer_rate      —— 回答非空（最弱口径，只保证"没哑火"）
-                   ② citation_accuracy—— 真值来源出现在本轮工具返回的 sources 里
-                   ③ answer_keyword_coverage / keyword_full_hit_rate
+                   ② citation_accuracy—— **检索口径**：真值来源出现在本轮工具返回的来源里
+                   ③ answer_citation_rate
+                                      —— **答案引用口径**：真值来源出现在答案正文的【来源：X】里
+                                         比 ② 更严：检索到了不等于答案标了。两个都留，因为
+                                         ②与已入库的三份基线可比，③才是"引用溯源"的真问题。
+                   ④ answer_keyword_coverage / keyword_full_hit_rate
                                       —— **答案内容质量**：金标关键词覆盖率（纯字符串匹配、零 LLM 成本）
-                   ④ p50/p95 延迟、token、成本
+                   ⑤ p50/p95 延迟、token、成本
                    是 prompt/模型/工具改动后防劣化的回归手段。
 
 用法：
@@ -25,6 +29,7 @@ import asyncio
 import datetime
 import json
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -96,6 +101,13 @@ def _metrics(results: list[dict]) -> dict:
         metrics["keyword_full_hit_rate"] = round(
             sum(1 for c in coverages if c >= 1.0) / len(coverages), 4
         )
+    # 答案引用口径（比 citation_accuracy 更严）：真值来源要出现在**答案正文**的【来源：X】里。
+    # 同一批旧报告没有这个字段，所以同样只在存在时输出，保证 --compare 不误报。
+    cited_flags = [r["answer_cited"] for r in results if r.get("answer_cited") is not None]
+    if cited_flags:
+        metrics["answer_citation_rate"] = round(
+            sum(1 for c in cited_flags if c) / len(cited_flags), 4
+        )
     metrics.update(_latency(results))
     return metrics
 
@@ -108,8 +120,10 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         ("cases", "{}", "{}", ""),
         ("answer_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("citation_accuracy", "{:.4f}", "{:.4f}", "{:+.4f}"),
+        ("answer_citation_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("answer_keyword_coverage", "{:.4f}", "{:.4f}", "{:+.4f}"),
         ("keyword_full_hit_rate", "{:.4f}", "{:.4f}", "{:+.4f}"),
+        ("p50_duration_ms", "{:.0f}", "{:.0f}", "{:+.0f}"),
         ("p95_duration_ms", "{:.0f}", "{:.0f}", "{:+.0f}"),
         ("avg_tokens", "{:.0f}", "{:.0f}", "{:+.0f}"),
         ("total_cost_cny", "{:.4f}", "{:.4f}", "{:+.4f}"),
@@ -167,6 +181,23 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         # 否则基线是旧口径报告，这里应当保持沉默而不是给出虚假的安心结论。
         print("  （关键词覆盖率无下降）")
 
+    # 答案引用口径劣化：检索命中了、但答案不再标注【来源：X】。
+    # 这是 citation_accuracy 抓不到的另一类劣化（它只看检索侧）。
+    cite_regressed = []
+    for r in b["per_case"]:
+        base_r = base_by_id.get(r["id"])
+        if not base_r:
+            continue
+        b_cited = base_r.get("answer_cited")
+        n_cited = r.get("answer_cited")
+        if b_cited is None or n_cited is None:
+            continue
+        if b_cited and not n_cited:
+            cite_regressed.append(r["id"])
+    if cite_regressed:
+        print("\n  [!] 答案引用覆盖下降（检索到了但答案没标注来源）：")
+        print(f"    用例 {cite_regressed}")
+
 
 async def main(limit: int, tag: str | None, compare: str | None) -> None:
     from app.agent.graph import create_runtime
@@ -179,7 +210,12 @@ async def main(limit: int, tag: str | None, compare: str | None) -> None:
     results = []
     try:
         for idx, case in enumerate(cases, start=1):
-            r = await _run_case(runtime, case)
+            # 每条用例一个独立 thread，跑完立刻删（见 AgentRuntime.aclose_thread）：
+            # 不显式给 session_id 的话，LangGraph 每轮现造 uuid 线程且没人回收，
+            # 40 条就是 40 个永久残留——而这张表正是服务在用的 data/checkpoints.sqlite。
+            thread_id = f"eval-{case['id']}-{uuid.uuid4().hex[:8]}"
+            r = await _run_case(runtime, case, thread_id)
+            await runtime.aclose_thread(thread_id)
             r["id"] = case["id"]
             results.append(r)
             mark = "OK" if r["citation_covered"] and r["answer_nonempty"] else "FAIL"
@@ -224,7 +260,7 @@ async def main(limit: int, tag: str | None, compare: str | None) -> None:
                   f"answer={r['answer_nonempty']} err={r['error']}")
 
 
-async def _run_case(runtime, case: dict) -> dict:
+async def _run_case(runtime, case: dict, thread_id: str | None = None) -> dict:
     from app.observability import Recorder, reset_recorder, set_recorder
 
     question = case["question"]
@@ -234,10 +270,12 @@ async def _run_case(runtime, case: dict) -> dict:
     rec = Recorder(question=question)
     token = set_recorder(rec)
     try:
-        result = await runtime.ainvoke([{"role": "user", "content": question}])
+        result = await runtime.ainvoke(
+            [{"role": "user", "content": question}], session_id=thread_id
+        )
         error = ""
     except Exception as exc:  # noqa: BLE001
-        result = {"answer": "", "sources": []}
+        result = {"answer": "", "sources": [], "retrieved_sources": []}
         error = str(exc)[:200]
         rec.error = error
     finally:
@@ -246,9 +284,17 @@ async def _run_case(runtime, case: dict) -> dict:
 
     answer = result["answer"] or ""
     sources = result["sources"] or []
-    # 口径说明：引用覆盖 = 真值来源文件名必须出现在工具返回的 sources 列表里（精确命中）。
-    # 模型在回答正文里复述文件名不算有效引用——避免"看过就复述"被误判为覆盖，评测口径收紧。
-    cited = any(expected_source in s for s in sources)
+    retrieved = result.get("retrieved_sources") or []
+    # 口径说明：`citation_covered` 仍然是**检索口径**——真值来源文件名必须出现在
+    # "本轮工具返回的 sources"（现名 retrieved_sources）列表里。保持它不变是为了让
+    # 三份已入库的基线报告（baseline / fullrun-verify / baseline-v2）继续可比：
+    # 它们的 per_case 里只有这个字段，改了含义会让历史基线作废、--compare 失去意义。
+    # 模型在回答正文里复述文件名不算有效引用——避免"看过就复述"被误判为覆盖。
+    cited = any(expected_source in s for s in retrieved)
+    # 新增的**答案引用口径**：真值来源必须出现在答案正文的【来源：X】里。
+    # 这是更严的真实引用判定（README 早先就写明"citation_accuracy 本质是检索侧判定、
+    # 不看答案文本"，这条把那个缺口补上），且与上面那条互不替代。
+    answer_cited = any(expected_source in s for s in sources)
     # 答案内容质量：金标关键词覆盖率（详见 eval/metrics.keyword_coverage）。
     # 同时把 answer 原文与 expected_keywords 一起存进报告，这样改了关键词只需
     # --reanalyze 离线重算（纯字符串匹配），不必重新花钱调 API。
@@ -257,6 +303,8 @@ async def _run_case(runtime, case: dict) -> dict:
         "id": 0,
         "answer_nonempty": bool(answer.strip()),
         "citation_covered": cited,
+        "answer_cited": answer_cited,
+        "retrieved_sources": retrieved,
         "expected_keywords": expected_keywords,
         "keyword_coverage": round(cov, 4),
         "keyword_missed": missed,

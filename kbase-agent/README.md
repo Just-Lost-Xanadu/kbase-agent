@@ -40,7 +40,7 @@ app/
 eval/                  # 40 条评测集 + 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测（24 项，`pytest` 实测 24 passed）
+tests/                 # smoke + 纯逻辑单测（33 项，`pytest` 实测 33 passed）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
 docs/
@@ -86,12 +86,23 @@ python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判
 
 API：
 - `GET /api/health`：存活探针，**不依赖 key / 索引**——503 排查时先打它，能区分"服务没起来"和"Agent 引擎没就绪"。
-- `POST /api/chat`：同步返回 `{answer, sources}`。
-- `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案与来源。
+- `POST /api/chat`：同步返回 `{answer, sources, retrieved_sources}`。
+- `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案与两个来源字段。
 - `GET /api/sessions` / `GET /api/sessions/{session_id}/messages`：读会话列表与历史消息（给前端"历史会话"用）。
 - `GET /api/runs` / `GET /api/runs/{id}`：运行 trace（耗时/token/成本/错误 + 节点级 steps），可观测用。
 - 请求体：`{messages:[{role,content}], session_id?}`。**同一 session 请只追加最新一条消息**（LangGraph 按 thread 自动拼历史，避免重复）。
 - **会话持久化**：Agent checkpoint（AsyncSqliteSaver）与消息记录共用 `data/checkpoints.sqlite`（WAL），**服务重启可续聊、历史可读**。
+
+> **两个来源字段是两个不同的问题，不要混用**（实测差值不是个例，而是常态）：
+> - `sources` = **答案正文里真实标注的【来源：X】**，即"答案引用了哪些来源"；
+> - `retrieved_sources` = **本轮工具返回过的来源**（top_k 命中），即"检索到了什么"。
+>
+> 复核 `/api/runs` 里 9 条带来源的 trace，**9/9 都比答案正文实际引用多 1 条**
+> （例：`retrieved_sources=['员工手册_示例.md','入职转正与离职制度_示例.md']`，而正文只标了
+> `【来源：员工手册_示例.md】`）。本版本之前 `sources` 走的是"检索口径"，前端却把它渲染成
+> "来源："标签——等于每一轮都替答案多声明一篇引用。对一个主打"引用溯源"的项目这是硬伤，
+> 所以把 `sources` 改成引用口径、检索口径另起名字返回，信息不丢、语义不再混淆。
+> 前端也据此分两行渲染：**"引用：X"** 与弱化的 **"本轮命中未引用：Y"**。
 
 示例对话：问"我今年还剩几天年假？按手册能结转吗？"——Agent 会先 `retrieve_knowledge` 拿《员工手册》结转规则，再 `query_business_db` 拿张三个人剩余天数，两条来源结合作答，末尾列引用。
 
@@ -106,11 +117,12 @@ API：
 `eval/questions.jsonl` 每条含 `expected_source`（40 条、id 1~40 不重复；真值来源全部是 `data/docs/` 里实际存在的 9 篇文件名）
 与 `expected_keywords`（从语料原文提取的关键事实，每条 1~3 个，用于答案内容质量评估）：
 - `scripts/eval.py`（检索层，离线零成本）：`topk_hit_rate` 是否命中正确来源。同一脚本里的 `citation_accuracy` 与它是同一个判定（都看 top-k 来源里有没有真值文件），两个数字必然相同，不应作为两个独立指标看待。
-- `scripts/eval_e2e.py`（端到端，真实调 Agent API）：四个维度——
+- `scripts/eval_e2e.py`（端到端，真实调 Agent API）：五个维度——
   1. 回答率（**只判非空**，最弱口径，只说明"没哑火"）；
-  2. 引用覆盖（真值来源是否出现在**本轮工具返回的 sources** 里，不判答案文本里有没有引用）；
-  3. **答案关键词覆盖率** `answer_keyword_coverage` / `keyword_full_hit_rate`——纯字符串匹配、零 LLM 成本，判"答案有没有把该条问题的核心事实讲出来"。这是对 1、2 两个维度的补位：1 只看非空、2 本质是检索侧判定，**两者都不看答案内容对不对**；
-  4. 耗时与成本（`p50_duration_ms` / `p95_duration_ms`，线性插值分位数，口径与 numpy 默认一致；含 MCP 子进程启动 + 检索 + LLM 往返）。
+  2. **检索口径**引用覆盖 `citation_accuracy`（真值来源是否出现在**本轮工具返回的** `retrieved_sources` 里，不判答案文本里有没有引用）；
+  3. **答案引用口径** `answer_citation_rate`——真值来源是否出现在**答案正文的【来源：X】**里。比第 2 条严：检索到了不等于答案标了。两条都留是有意的：第 2 条与已入库的三份基线可比，第 3 条才是"引用溯源"真正要回答的问题；
+  4. **答案关键词覆盖率** `answer_keyword_coverage` / `keyword_full_hit_rate`——纯字符串匹配、零 LLM 成本，判"答案有没有把该条问题的核心事实讲出来"。这是对 1、2、3 的补位：1 只看非空、2/3 只看"来源对不对"，**都不看答案内容对不对**；
+  5. 耗时与成本（`p50_duration_ms` / `p95_duration_ms`，线性插值分位数，口径与 numpy 默认一致；含 MCP 子进程启动 + 检索 + LLM 往返）。
 
 > **关键词覆盖率的边界（本指标不构成正确率）**：它只判"有没有提到"，**不判表述是否正确**
 > （不识别否定、条件、张冠李戴），关键词也是人工挑选、粒度粗，**而且对同义改写敏感**——
@@ -123,16 +135,17 @@ API：
 
 40 条是回归冒烟集，不是统计评测，因此本文所有结论都按"离线回归集 + 可视化坏例调参"的定性口径陈述，不用百分比对外描述能力。
 
-**三份入库报告的实测数字**（`docs/eval-reports/`，同口径可复算）：
+**四份入库报告的实测数字**（`docs/eval-reports/`，同口径可复算）：
 
-| 报告 | tag / 时间 | answer_rate | citation | 关键词覆盖 | p50 延迟 | p95 延迟 | 总成本 |
-|---|---|---|---|---|---|---|---|
-| `baseline.json` | baseline / 2026-09-07 | 40/40 | 40/40 | *（旧口径，未采集）* | 7420 ms | 12368 ms | ¥0.2927 |
-| `fullrun-verify.json` | fullrun-verify / 2026-09-13 | 40/40 | 40/40 | *（旧口径，未采集）* | 7497 ms | 12975 ms | ¥0.3020 |
-| `baseline-v2.json` | baseline-v2 / 2026-09-18 | 40/40 | 40/40 | **1.0（全命中率 1.0）** | 6438 ms | 11049 ms | ¥0.3029 |
+| 报告 | tag / 时间 | answer_rate | 检索口径引用 | 答案引用口径 | 关键词覆盖 | p50 延迟 | p95 延迟 | 总成本 |
+|---|---|---|---|---|---|---|---|---|
+| `baseline.json` | baseline / 2026-09-07 | 40/40 | 40/40 | *（旧口径，未采集）* | *（未采集）* | 7420 ms | 12368 ms | ¥0.2927 |
+| `fullrun-verify.json` | fullrun-verify / 2026-09-13 | 40/40 | 40/40 | *（旧口径，未采集）* | *（未采集）* | 7497 ms | 12975 ms | ¥0.3020 |
+| `baseline-v2.json` | baseline-v2 / 2026-09-18 | 40/40 | 40/40 | *（未采集）* | 1.0（全命中 1.0） | 6438 ms | 11049 ms | ¥0.3029 |
+| `post-parallel.json` | post-parallel / 2026-09-21 | 40/40 | 40/40 | **40/40** | 1.0（全命中 1.0） | **6442 ms** | **7256 ms** | ¥0.2955 |
 
 **这些数字的含义与边界**（避免把弱指标当成效果证明）：
-- 三次 `citation_accuracy` 全是 1.0、`--compare` 报"无逐条变化"，说明**该集合当前没有区分度**——
+- 四次 `citation_accuracy` 全是 1.0、`--compare` 报"无逐条变化"，说明**该集合当前没有区分度**——
   它的价值是"防劣化的回归基线"，不是"效果有多好"的证明；
 - **新加的关键词覆盖率在这个集合上也饱和到 1.0**，所以它同样**不是"质量有多好"的证明**。
   它真正的价值有两条：① 能抓到 `citation` 抓不到的劣化——"来源引用对了、但答案没讲出关键事实"；
@@ -140,9 +153,41 @@ API：
   `answer_keyword_coverage` 就是 **0.00**，而同一轮的 `citation_accuracy` 只从 1.0 掉到 0.5，
   不看关键词就发现不了"其实什么都没答上来"；
 - 想让评测有区分度，正确做法是**加更难的金标**（多跳、跨文档冲突、应拒答题），不是调参刷分；
-- 延迟 p50 ≈ 6.4s / p95 ≈ 11.0s，且不同轮次之间 p95 有 ~1s 抖动（`baseline` vs `baseline-v2`
-  就差了 1319ms），**主要成本是每条都新起 stdio 子进程 + 真实 LLM 往返**，这也是本项目最该优化的
-  工程点（见「已知取舍」）。所以**单次运行的 p95 不是稳定指标**，只能用于同环境下的相对比较。
+- **`p95` 从 11049 ms 降到 7256 ms（−34%），`max` 从 12463 ms 降到 7674 ms（−38%），而 `p50` 几乎没动
+  （6438 → 6442 ms）**——这个"中位数不动、尾部明显变短"的形状，正是本轮"一批工具调用并发执行"
+  改造应该留下的痕迹：40 条里多数用例只调 1 个工具（并发无从发挥），少数调 2 个工具的用例
+  原本要把两个 MCP 子进程的启动时间相加，正是它们构成了尾部。**中位数没变说明改动没有副作用，
+  尾部变短说明它确实打在了瓶颈上**——这比"整体平均快了 X%"更有信息量。
+  注：`p50`/`p95` 单次运行都有约 1s 抖动（`baseline` vs `baseline-v2` 的 p95 就差了 1319 ms，
+  但两者代码完全相同），所以单次运行的 p95 只能用于同环境相对比较，不宜当绝对值引用。
+
+### 检索路消融：**这个金标集证明不了"混合检索有用"**（离线、零成本、可复算）
+
+只说"用了向量 + BM25 + RRF"是没用的，得知道它到底带来了什么。下面这组数字是把
+`scripts/eval.py` 的三条路拆开单独跑出来的（同一份 40 条金标、同一套语料、top_k=3）：
+
+| 检索路 | topk_hit_rate | 说明 |
+|---|---|---|
+| 仅向量（Chroma cosine） | **1.0000** | |
+| 仅 BM25（字符 bigram） | **1.0000** | |
+| 向量 + BM25 走 RRF（本项目当前实现） | **1.0000** | 与上面两条**完全一样** |
+| 随机取 3 个来源（2 万次模拟） | 0.5004 | 只有 6 个来源曾作为真值出现，所以纯随机也有 ~50% |
+| 永远只答"员工手册"（语料里最长的文档） | 0.3500 | 常量基线的下界 |
+
+**结论要说清楚**：在这个集合上，**RRF 相对任一单路检索没有可测量的收益**——三条路都是 1.0，
+`--compare` 也永远报"无逐条变化"。之所以如此，是因为语料太小：
+9 篇文档按 recursive 切分只有 **10 个分块**（fixed 是 13 个），top_k=3 几乎必然命中，
+而 40 条问题的真值只落在 **6 篇**文档上（另外 3 篇 office 样例从未作为真值出现）。
+所以本文**不宣称"混合检索带来了 X% 的提升"**——本项目没有数据支持这句话。
+
+那为什么还留 RRF？两条理由，都不是"效果更好"：
+1. **它是设计动机，不是实测结论**：向量路对字面词（`429`、`OA`）不敏感、BM25 路对同义改写不敏感，
+   两路互补在**更大、更杂的语料**上才会显出来——这一点本项目没测到，如实标注为"未证明"；
+2. **RRF 的正确性本身是被测住的**：`tests/test_units.py::test_hybrid_rrf_merges_by_chunk_id`
+   锁的是"两路都命中的 chunk 必须靠前、按 chunk_id 去重"这个融合行为，与它有没有涨点无关。
+
+**想让这张表有区分度，正确做法是换更难的金标**（多跳、跨文档冲突、应拒答），
+而不是调 `top_k` 或改融合权重去刷分——那只会把一个饱和指标刷得更饱和。
 
 **口径边界（本文明确声明的覆盖范围）**：40 条都是**单轮**提问（每条走新 thread，不共享上下文），所以**多轮行为不在评测覆盖内**。同一 session 续聊时历史会累积，模型可能直接基于上下文作答而**不再调工具**，该轮 `sources` 因此为空——引用只统计**本轮**工具返回，历史轮次的来源不会带过来（`data/business` 个人数据工具输出也不含【来源：】标记，本来就不贡献 sources）。
 
@@ -165,10 +210,11 @@ flowchart TD
 ## 设计要点
 
 - **框架**：LangGraph 有状态图、SQLite 断点续聊（AsyncSqliteSaver + WAL，重启不丢会话；高并发生产可换 Postgres）；选 LangGraph 而非预制 Agent 函数，是为了拿到显式状态、checkpoint 与精细护栏。
-- **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。代价是每次工具调用新起子进程，也是端到端延迟的主要来源。
+- **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。代价是**每次工具调用都新起一个子进程**（adapters 在 `tool.ainvoke` 内部开/关会话），这也是端到端延迟的主要来源。
+- **一批工具调用并发执行**：模型在一次 assistant 消息里给出多个 `tool_call`（例如"先查制度规则 + 再查个人数据"），本就表示它们互不依赖；`tools_node` 用 `asyncio.gather` 并发跑，而不是 `for … await` 串行相加。实测两个工具 **8127ms → 4663ms（省 43%）**。并发化最容易顺手拆掉的护栏是"批内重复调用判重"（串行实现里第二个相同调用会被第一个刚写进 history 的 key 拦下），所以现在是**先整批派单判重、再并发执行、最后按模型给的原序组装消息与 trace**——`tests/test_units.py::test_tools_node_runs_batch_concurrently_and_still_dedupes` 把这三件事一起锁住。
 - **RAG**：混合检索（向量 + BM25 做 RRF）去抖 + 可选重排 + 引用溯源 + 评测集验证，坏例能说清怎么调好的。
 - **工程化**：SSE 节点级流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
-- **效果与成本**：40 条金标两层 Harness（`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；最近一轮基线（baseline-v2）实测延迟 p50 ≈ 6.4s / p95 ≈ 11.0s、单条成本 ≈ ¥0.0076，`/api/runs` 有节点级 trace 可逐条归因（**延迟大头是每条新起 MCP stdio 子进程 + LLM 往返**，不是检索）。
+- **效果与成本**：40 条金标两层 Harness（`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；最近一轮基线（`post-parallel`，2026-09-21）实测延迟 p50 ≈ 6.4s / **p95 ≈ 7.3s**、单条成本 ≈ ¥0.0074，`/api/runs` 有节点级 trace 可逐条归因（**延迟大头仍是每条新起 MCP stdio 子进程 + LLM 往返**，不是检索）。相比改造前的 `baseline-v2`（p95 ≈ 11.0s），**p95 降了 34% 而 p50 未变**——因为收益只落在"一次调多个工具"的尾部用例上。
 
 ## 容器化部署设计（**未实施**，方案已想清）
 
@@ -214,7 +260,10 @@ flowchart TD
 
 - **Anaconda 下 onnxruntime 报 `DLL load failed`**：是 Anaconda 自带旧版 VC 运行库（vcruntime140/msvcp140≈14.29）盖过了系统新版。执行 `conda update -n base -c conda-forge -y vs2015_runtime` 一次即可（torch/bge 同理会遇到）。
 - 首次跑 `scripts/index_docs.py` 会从 HuggingFace 下载 embedding 模型（几十 MB）；**换 embedding 模型后必须重建索引**（重跑 `index_docs.py` 即可，它会先清空 collection）。
-- 每个 MCP 工具调用都会新起一个 stdio 子进程（真 MCP 的代价）；演示规模无所谓，要提速可把 `app/mcp/servers.py` 改成进程内直连。**这是当前 p95 延迟的主要来源**（`--compare` 两次跑的 p95 就差了 ~600ms，抖动也来自子进程启动与 LLM 往返）。
+- 每个 MCP 工具调用都会新起一个 stdio 子进程（真 MCP 的代价，adapters 在 `tool.ainvoke` 内部开/关会话）；演示规模无所谓，要提速可把 `app/mcp/servers.py` 改成进程内直连——但那会**放弃本项目的核心卖点**（真协议边界），所以留作取舍而不是默认做法。**这是延迟的主要来源**：单次 `retrieve_knowledge` 实测约 4.7s，其中大部分是子进程启动 + 冷加载 BM25/Chroma。
+  - 已经做掉的一步是**同一批的多个工具调用并发执行**（见「设计要点」），实测两个工具 8127ms → 4663ms；
+  - 还没有做的一步是**让一个 runtime 复用一个常驻 stdio 会话**（`MultiServerMCPClient.session()` 已提供、`AgentRuntime` 也已经持有生命周期），那样每次调用就不必再付解释器启动 + 索引加载的钱，且**不破坏"真 MCP"这个属性**。这是目前性价比最高的下一步，**未实施**，不写进"已完成"。
+- 索引的 sidecar（`data/chroma/chunks.jsonl`）是**原子发布**的（写 `.tmp` 再 `os.replace`），且 `is_indexed()` 会把"读不出来的 sidecar"判为"没有索引"从而触发自动重建。改之前，`index_docs.py` 中途 Ctrl-C 留下的半截文件会让 `is_indexed()` 一直为真、`ensure_ready()` 一直抛 `JSONDecodeError`，服务对每个请求都回 503 且**永不自动恢复**（已实测复现）。
 
 ## 许可证
 

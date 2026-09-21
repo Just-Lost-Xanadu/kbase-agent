@@ -20,13 +20,26 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage] = Field(description="历史消息 + 最新用户输入")
+    # 契约（与 graph.AgentRuntime._build_input 一致，别按字段名想当然）：
+    # **同一 session 每次只追加最新一条 user 消息**，历史由 LangGraph 按 thread 自动拼接。
+    # 把整段历史每轮都发过来会让 checkpoint 里的消息翻倍、prompt token 虚高、
+    # 模型把每一轮都看到两遍。这里保留 list 只是为了兼容"一次多轮"的批式调用方。
+    messages: list[ChatMessage] = Field(
+        description="最新用户输入（同一 session 请只追加最新一条；历史由服务端按 session 续接）"
+    )
     session_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
-    sources: list[str] = Field(default_factory=list, description="引用来源")
+    sources: list[str] = Field(
+        default_factory=list,
+        description="答案正文里真实标注的【来源：X】——即『答案引用了哪些来源』",
+    )
+    retrieved_sources: list[str] = Field(
+        default_factory=list,
+        description="本轮工具（检索）返回过的来源，即 top-k 命中；是检索口径，不等于答案引用",
+    )
 
 
 def _question_of(req: ChatRequest) -> str:
@@ -56,7 +69,13 @@ async def _record_turn(req: ChatRequest, answer: str, sources: list[str]) -> Non
     )
 
 
-async def _save_trace(req: ChatRequest, recorder_summary: dict, answer: str, sources: list[str]) -> None:
+async def _save_trace(
+    req: ChatRequest,
+    recorder_summary: dict,
+    answer: str,
+    sources: list[str],
+    retrieved_sources: list[str],
+) -> None:
     """持久化一次运行的 trace（观测用，失败不影响回答）。"""
     from app import store
 
@@ -65,6 +84,7 @@ async def _save_trace(req: ChatRequest, recorder_summary: dict, answer: str, sou
         recorder_summary=recorder_summary,
         answer=answer,
         sources=sources,
+        retrieved_sources=retrieved_sources,
     )
 
 
@@ -76,13 +96,14 @@ async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
     """
     answer = (result or {}).get("answer", "")
     sources = (result or {}).get("sources", []) or []
+    retrieved = (result or {}).get("retrieved_sources", []) or []
     if result is not None:
         try:
             await _record_turn(req, answer, sources)
         except Exception:  # noqa: BLE001
             pass
     try:
-        await _save_trace(req, rec.summarize(), answer, sources)
+        await _save_trace(req, rec.summarize(), answer, sources, retrieved)
     except Exception:  # noqa: BLE001
         pass
 
@@ -119,7 +140,11 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
         reset_recorder(token)
     # 成功路径同样 shield：答案已产出，此刻若客户端断开也不能丢掉这次 trace
     await asyncio.shield(_persist(req, rec, result))
-    return ChatResponse(answer=result["answer"], sources=result["sources"])
+    return ChatResponse(
+        answer=result["answer"],
+        sources=result["sources"],
+        retrieved_sources=result.get("retrieved_sources", []),
+    )
 
 
 @router.post("/chat/stream")

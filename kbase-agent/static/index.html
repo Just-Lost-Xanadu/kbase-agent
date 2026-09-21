@@ -46,6 +46,9 @@
   .bot  { align-self: flex-start; background: #1c242e; border-bottom-left-radius: 4px; }
   .sources { margin-top: 8px; font-size: 12px; color: #7dd3fc; }
   .sources span { background: #123a4f; padding: 2px 8px; border-radius: 10px; margin-right: 6px; white-space: nowrap; }
+  /* 检索命中但答案没引用的来源：与"引用"必须视觉可区分，否则等于替答案多声明引用 */
+  .sources.hit { color: #8b98a5; }
+  .sources.hit span { background: #232c36; color: #8b98a5; }
   #status { display: none; font-size: 12px; color: #fbbf24; padding: 0 20px 8px; }
   #chips { display: flex; gap: 8px; padding: 0 20px 10px; flex-wrap: wrap; }
   #chips button { background: #1c242e; color: #cbd5e1; border: 1px solid #2a3441; border-radius: 14px;
@@ -123,19 +126,36 @@
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/`([^`]+)`/g, '<code>$1</code>');
   }
-  function addMsg(role, text, sources) {
+  // 来源分两行渲染，因为服务端给的是两个不同口径：
+  //   cited     = 答案正文里真实标注的【来源：X】（= 答案引用了什么）
+  //   retrieved = 本轮工具返回过的来源（= top-k 检索命中了什么）
+  // 实测两者经常不一致（命中 2 篇、答案只引用 1 篇）。旧版把 retrieved 直接标成"来源："，
+  // 等于在每一轮里替答案多声明一篇引用——对一个主打"引用溯源"的项目这是硬伤。
+  // 所以：引用一律显示；命中里"多出来的那几篇"另起一行、弱化配色，明示未被引用。
+  function renderSources(container, cited, retrieved) {
+    const cite = cited || [];
+    if (cite.length) {
+      const s = document.createElement('div');
+      s.className = 'sources';
+      s.innerHTML = cite.map(x => '<span>引用：' + esc(x) + '</span>').join('');
+      container.appendChild(s);
+    }
+    const extra = (retrieved || []).filter(x => !cite.includes(x));
+    if (extra.length) {
+      const r = document.createElement('div');
+      r.className = 'sources hit';
+      r.innerHTML = extra.map(x => '<span>本轮命中未引用：' + esc(x) + '</span>').join('');
+      container.appendChild(r);
+    }
+  }
+  function addMsg(role, text, sources, retrieved) {
     const tip = document.getElementById('emptyTip');
     if (tip) tip.remove();
     const div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
     // 用户输入保持原样展示；仅对 Agent 回答做 Markdown 可读化
     div.innerHTML = role === 'user' ? esc(text) : mdToHtml(text);
-    if (sources && sources.length) {
-      const s = document.createElement('div');
-      s.className = 'sources';
-      s.innerHTML = sources.map(x => '<span>来源：' + esc(x) + '</span>').join('');
-      div.appendChild(s);
-    }
+    renderSources(div, sources, retrieved);
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
     return div;
@@ -224,6 +244,7 @@
     const decoder = new TextDecoder();
     let finalAnswer = '';
     let finalSources = [];
+    let finalRetrieved = [];
     let sseError = null;
     let filled = false;   // 占位气泡是否已写入内容（决定 finally 里要不要移除它）
     let stepPreviewEl = null;
@@ -253,7 +274,12 @@
           }
         } catch (err) { console.warn('SSE 本地解析', err.message); }
       } else if (eventName === 'done') {
-        try { const d = JSON.parse(dataStr); finalAnswer = d.answer || ''; finalSources = d.sources || []; } catch (e) {}
+        try {
+          const d = JSON.parse(dataStr);
+          finalAnswer = d.answer || '';
+          finalSources = d.sources || [];
+          finalRetrieved = d.retrieved_sources || [];
+        } catch (e) {}
       } else if (eventName === 'error') {
         try { const d = JSON.parse(dataStr); sseError = (d && d.message) || 'Agent 输出错误'; } catch (e) { sseError = 'Agent 输出错误'; }
       }
@@ -308,16 +334,12 @@
         placeholder.className = 'msg bot';
         placeholder.innerHTML = mdToHtml(finalAnswer);
         filled = true;
-        if (finalSources && finalSources.length) {
-          const s = document.createElement('div');
-          s.className = 'sources';
-          s.innerHTML = finalSources.map(x => '<span>来源：' + esc(x) + '</span>').join('');
-          placeholder.appendChild(s);
-        }
+        renderSources(placeholder, finalSources, finalRetrieved);
       } else {
         // 真没拿到 done.answer 时的诊断：让 F12 一眼看收到几个事件/是否有 error，方便定位
+        const tail = buf.slice(-120);   // 必须在 buf 被清空前取，否则日志里永远是空串
         console.warn('[kbase] SSE 结束但未收到 done.answer',
-          { eventTotal, bufTail: buf.slice(-120), sseError });
+          { eventTotal, bufTail: tail, sseError });
         placeholder.textContent = '（空回答）';
         filled = true;
       }
@@ -336,7 +358,13 @@
 
   newBtn.addEventListener('click', newConversation);
   sendBtn.addEventListener('click', () => ask(input.value));
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') ask(input.value); });
+  input.addEventListener('keydown', e => {
+    // 中文输入法：回车是"确认候选词"，此时 keydown 也会是 Enter。
+    // 不挡 isComposing 的话，拼音打到一半按回车就会把半截问题发出去
+    // （keyCode 229 是部分旧浏览器的等价信号）。这是个中文演示页，必须挡。
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+    ask(input.value);
+  });
   document.querySelectorAll('#chips button').forEach(b =>
     b.addEventListener('click', () => ask(b.dataset.q)));
 

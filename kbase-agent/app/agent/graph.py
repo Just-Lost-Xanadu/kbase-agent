@@ -8,6 +8,7 @@
 
 import asyncio
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -107,6 +108,10 @@ def _text_of(content) -> str:
 
 
 def _parse_sources(messages: list) -> list[str]:
+    """**检索口径**：本轮工具返回过的来源（top_k 命中里带【来源：文件名】标记的那些）。
+
+    注意这不是"答案引用了什么"——不要拿它当引用准确性用（见 _parse_citations 的说明）。
+    """
     sources: list[str] = []
     for message in messages:
         if getattr(message, "type", "") != "tool":
@@ -118,6 +123,35 @@ def _parse_sources(messages: list) -> list[str]:
                 if source and source not in sources:
                     sources.append(source)
     return sources
+
+
+_CITATION_RE = re.compile(r"【来源：([^】]+)】")
+
+
+def _parse_citations(answer: str) -> list[str]:
+    """**引用口径**：答案正文里真实出现的【来源：文件名】，按出现顺序去重。
+
+    与 _parse_sources 的区别（两者口径不同，不要混）：
+      - `_parse_sources` 看的是**工具返回过什么**（top_k 命中，每篇都被标注出来）；
+      - `_parse_citations` 看的是**答案正文里到底引用了什么**。
+    实测差值不是边角情况而是常态：复核 /api/runs 里 9 条带 sources 的 trace，
+    **9/9 都比答案正文引用多 1 条**（例：sources=['员工手册_示例.md','入职转正与离职制度_示例.md']，
+    而正文只标了【来源：员工手册_示例.md】）。前端把工具口径直接渲染成"来源："标签，
+    等于在 100% 的轮次里替答案多声明了一篇引用——对一个主打"引用溯源"的项目，
+    这是会被一眼看穿的过度声明。
+
+    因此 API 的 `sources` 字段改为本函数的结果（与用户直觉一致：答案引用了哪些来源），
+    工具口径改名 `retrieved_sources` 一并返回，信息不丢、语义不再混淆。
+
+    匹配用整段扫描而不是"只看行首"：模型既可能把引用单独列在末尾（prompt 的推荐做法），
+    也可能写在句子中间（如"按【来源：员工手册_示例.md】的规定"），两种都是真实引用。
+    """
+    citations: list[str] = []
+    for match in _CITATION_RE.finditer(answer or ""):
+        source = match.group(1).strip()
+        if source and source not in citations:
+            citations.append(source)
+    return citations
 
 
 def _final_answer(messages: list) -> str:
@@ -187,64 +221,99 @@ def _build_graph(llm, tools: list, checkpointer):
         rec: Recorder | None = get_recorder()
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None) or []
-        new_messages: list = []
         # 判重窗口 = 最近 max_steps 次工具调用，实际只在"本次运行内"能命中：
         # history 存进 checkpoint 后 tuple 会被序列化成 list，跨轮次读回时
         # tuple key 与 list 条目不相等，因此不会误拦跨轮次的合法重复查询
         # （跨轮次重复提问本就应当重新检索，见 guardrails.is_duplicate_call）。
         history = list(state.get("tool_call_history", []))[-AgentLimits.max_steps :]
 
+        # ---- 第一步：先"派单"（纯同步判断，必须在任何执行之前做完）----
+        # 为什么不能边执行边判重：同一批里模型可能吐出两个完全相同的调用。串行实现里
+        # 第二个会被第一个刚追加进 history 的 key 拦下；如果改成"先并发跑、事后再判重"，
+        # 两个都会被执行——判重这道护栏就被这个改动悄悄拆掉了。所以先把整批的
+        # 执行/跳过/报错决定一次性算出来，执行阶段只负责跑，不再改判。
+        planned: list[dict] = []
+        seen = list(history)
         for call in calls:
             name = call.get("name", "")
             args = call.get("args") or {}
             key = (name, json.dumps(args, ensure_ascii=False, sort_keys=True))
             tool = tools_by_name.get(name)
-            t0 = now_ms()
-
             if tool is None:
-                content = f"未找到工具：{name}"
-            elif is_duplicate_call(history, key):
-                content = (
-                    f"检测到重复工具调用（{name} {args}，本轮已执行过），"
-                    "为避免死循环本次不再执行。请基于已有信息作答，或换个问法。"
-                )
+                planned.append({"call": call, "name": name, "key": key, "tool": None,
+                                "content": f"未找到工具：{name}", "ok": False,
+                                "note": "工具不存在"})
+            elif is_duplicate_call(seen, key):
+                planned.append({
+                    "call": call, "name": name, "key": key, "tool": None,
+                    "content": (
+                        f"检测到重复工具调用（{name} {args}，本轮已执行过），"
+                        "为避免死循环本次不再执行。请基于已有信息作答，或换个问法。"
+                    ),
+                    "ok": True, "note": "重复调用，已跳过",
+                })
             else:
-                try:
-                    raw = await asyncio.wait_for(
-                        tool.ainvoke(args), timeout=AgentLimits.step_timeout_seconds
-                    )
-                    content = truncate_tool_output(
-                        _text_of(raw), AgentLimits.max_tool_output_chars
-                    )
-                except asyncio.TimeoutError:
-                    content = f"工具 {name} 调用超时（>{AgentLimits.step_timeout_seconds}s）"
-                except Exception as exc:  # noqa: BLE001
-                    content = f"工具 {name} 调用失败：{type(exc).__name__}: {exc}"
+                seen.append(key)
+                planned.append({"call": call, "name": name, "key": key,
+                                "tool": tool, "content": None, "ok": True, "note": ""})
 
+        # ---- 第二步：并发执行本批里"要跑"的调用 ----
+        # 模型在一次 assistant 消息里给出多个 tool_call，本身就表示它认为这些调用互不依赖
+        # （例如"先查制度规则 + 再查个人数据"）。串行 for-await 会让每个调用各自新起一个
+        # MCP stdio 子进程、耗时直接相加：实测两个工具 8127ms；改成 gather 后 4663ms，
+        # 省掉 3464ms（43%）。这也是本项目最该优化的工程点（README「已知取舍」有口径说明）。
+        async def run_tool(item: dict) -> None:
+            """执行单个工具调用，把结果写回 item。异常一律收敛成文本，不外抛。"""
+            name = item["name"]
+            args = item["call"].get("args") or {}
+            t0 = now_ms()
+            try:
+                raw = await asyncio.wait_for(
+                    item["tool"].ainvoke(args), timeout=AgentLimits.step_timeout_seconds
+                )
+                item["content"] = truncate_tool_output(
+                    _text_of(raw), AgentLimits.max_tool_output_chars
+                )
+            except asyncio.TimeoutError:
+                item["content"] = (
+                    f"工具 {name} 调用超时（>{AgentLimits.step_timeout_seconds}s）"
+                )
+                item["ok"] = False
+                item["note"] = item["content"][:160]
+            except Exception as exc:  # noqa: BLE001
+                item["content"] = f"工具 {name} 调用失败：{type(exc).__name__}: {exc}"
+                item["ok"] = False
+                item["note"] = item["content"][:160]
+            item["duration_ms"] = now_ms() - t0
+
+        to_run = [item for item in planned if item["tool"] is not None]
+        if to_run:
+            await asyncio.gather(*(run_tool(item) for item in to_run))
+
+        # ---- 第三步：按模型给出的顺序组装消息与 trace ----
+        # 顺序必须稳定：ToolMessage 要严格对应各自的 tool_call_id，且 trace 的 steps
+        # 不能因为"谁先跑完"而抖动（否则同一份报告两次跑出来的 steps 顺序都不一样）。
+        new_messages: list = []
+        for item in planned:
             new_messages.append(
-                ToolMessage(content=content, tool_call_id=call.get("id", ""), name=name)
+                ToolMessage(
+                    content=item["content"],
+                    tool_call_id=item["call"].get("id", ""),
+                    name=item["name"],
+                )
             )
-            history.append(key)
-
             if rec is not None:
-                note = ""
-                ok = True
-                if tool is None:
-                    ok = False
-                    note = "工具不存在"
-                elif content.startswith("检测到重复工具调用"):
-                    note = "重复调用，已跳过"
-                elif "超时" in content or "调用失败" in content:
-                    ok = False
-                    note = content[:160]
                 rec.add(
-                    Step(node="tools", name=name, duration_ms=now_ms() - t0,
-                         ok=ok, note=note)
+                    Step(node="tools", name=item["name"],
+                         duration_ms=item.get("duration_ms", 0),
+                         ok=item["ok"], note=item["note"])
                 )
 
         return {
             "messages": new_messages,
-            "tool_call_history": history[-AgentLimits.max_steps :],
+            # 与串行实现口径一致：整批调用的 key 都进历史（含被跳过/未找到的），
+            # 只保留最近 max_steps 条；用 seen 而不是重算，避免与判重时的顺序漂移。
+            "tool_call_history": seen[-AgentLimits.max_steps :],
         }
 
     graph = StateGraph(AgentState)
@@ -319,9 +388,23 @@ class AgentRuntime:
         # 答案与来源都只从本轮新增的消息里取：
         # sources 不累计历史轮次；answer 也不回退到上一轮（见 _final_answer 说明）
         fresh = final_messages[prior:]
+        return self._result(fresh)
+
+    @staticmethod
+    def _result(fresh: list) -> dict:
+        """统一收尾口径：answer / sources（答案真实引用）/ retrieved_sources（本轮检索命中）。
+
+        两个来源字段是两个不同的问题，必须分开返回（见 _parse_citations 的实测说明）：
+          - sources            = 答案正文里真实标注的【来源：X】——前端"引用来源"与用户直觉一致；
+          - retrieved_sources  = 本轮工具返回过的来源（top_k 命中的文件）——观测/评测的检索口径。
+        历史字段 `sources` 原本是后者，实测 9/9 条 trace 都比答案实际引用多 1 条，
+        前端把它渲染成"来源："属于替答案多声明引用，因此本版本把语义改成前者。
+        """
+        answer = _final_answer(fresh)
         return {
-            "answer": _final_answer(fresh),
-            "sources": _parse_sources(fresh),
+            "answer": answer,
+            "sources": _parse_citations(answer),
+            "retrieved_sources": _parse_sources(fresh),
         }
 
     async def astream(self, messages: list[dict], session_id: str | None = None):
@@ -336,11 +419,23 @@ class AgentRuntime:
         values = snapshot.values or {}
         final_messages = values.get("messages", [])
         # 与 ainvoke 同口径：答案与来源都只看本轮新增消息
-        fresh = final_messages[prior:]
-        yield {
-            "answer": _final_answer(fresh),
-            "sources": _parse_sources(fresh),
-        }
+        yield self._result(final_messages[prior:])
+
+    async def aclose_thread(self, session_id: str) -> None:
+        """删掉某个 session 的 checkpoint 线程（评测/回归专用）。
+
+        为什么需要：`ainvoke(session_id=None)` 会现造一个 uuid thread，而 checkpoint 表是
+        服务真正在用的那个 `data/checkpoints.sqlite`。评测跑 40 条就是 40 个永不回收的线程
+        （实测：只跑过几轮评测的库里有 257 个 thread_id、13.4 MB，而真实会话只有 9 个）。
+        评测用例本就是一次性的，跑完即删，别让它污染服务侧的会话库。
+        """
+        if self._saver is None:
+            return
+        try:
+            await self._saver.adelete_thread(session_id)
+        except Exception:  # noqa: BLE001
+            # 清理失败不该让评测本身失败（指标已经拿到了）
+            pass
 
     async def aclose(self) -> None:
         # adapters 每个工具调用自己开/关 stdio 会话，无需常驻清理；

@@ -1,5 +1,7 @@
 """纯逻辑单元测试：不依赖外部模型/网络，装好 base 依赖即可跑。"""
 
+import pytest
+
 from app.guardrails import (
     AgentLimits,
     default_recursion_limit,
@@ -221,3 +223,222 @@ def test_index_resets_vector_store_before_adding(tmp_path, monkeypatch):
     assert calls[0] == "reset", f"reset 必须先于 add 执行，实际顺序={calls}"
     assert calls[1].startswith("add:"), f"add 应紧随 reset，实际顺序={calls}"
     assert int(calls[1].split(":")[1]) > 0
+
+
+# —— sources 语义：答案引用 ≠ 检索命中 ——
+# 背景（已实测）：字段 `sources` 原本是"本轮工具返回过的来源"（top_k 命中里的文件名），
+# 而前端把它渲染成"来源："标签。复核 9 条 trace，**9/9 都比答案正文实际引用的多 1 条**
+# （例：命中 ['员工手册','入职转正与离职制度']，正文只标了【来源：员工手册】）——
+# 等于每轮都替答案多声明一篇引用。现在拆成两个字段：sources=答案引用、retrieved_sources=检索命中。
+
+
+def test_parse_citations_only_reads_the_answer_text():
+    from app.agent.graph import _parse_citations
+
+    answer = "结论如下。\n\n【来源：员工手册_示例.md】\n另见【来源：产品FAQ_示例.md】"
+    assert _parse_citations(answer) == ["员工手册_示例.md", "产品FAQ_示例.md"]
+    # 去重、保序；没标注就是空
+    assert _parse_citations("【来源：a.md】\n【来源：a.md】") == ["a.md"]
+    assert _parse_citations("没有标注来源的答案") == []
+    assert _parse_citations("") == []
+
+
+def test_result_separates_answer_citations_from_retrieved_sources():
+    """核心回归：正文只引用 1 篇、但工具命中了 2 篇时，sources 必须是 1 篇。"""
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    from app.agent.graph import AgentRuntime
+
+    fresh = [
+        ToolMessage(
+            content=(
+                "【来源：员工手册_示例.md】\n结转规则…\n\n---\n\n"
+                "【来源：入职转正与离职制度_示例.md】\n离职规则…"
+            ),
+            tool_call_id="t1",
+            name="retrieve_knowledge",
+        ),
+        AIMessage(content="最多结转 3 天。\n\n【来源：员工手册_示例.md】"),
+    ]
+    result = AgentRuntime._result(fresh)
+    assert result["sources"] == ["员工手册_示例.md"]                      # 答案真的引用了什么
+    assert result["retrieved_sources"] == [                              # 检索到底命中了什么
+        "员工手册_示例.md",
+        "入职转正与离职制度_示例.md",
+    ]
+    # 旧口径（把命中当引用）会让 sources 变成 2 条——这条断言就是防止回退
+    assert len(result["sources"]) < len(result["retrieved_sources"])
+
+
+# —— 工具调用：并发执行 + 批内判重 ——
+# 背景：tools_node 原来是 for-await 串行执行一批 tool_calls，而每个调用各自新起一个
+# MCP stdio 子进程，耗时直接相加（实测两个工具 8127ms → 并发 4663ms，省 43%）。
+# 改并发时最容易顺手拆掉的护栏就是"批内重复调用判重"（串行实现里第二个相同调用
+# 会被第一个刚写进 history 的 key 拦下），所以这条测试同时锁住"并发"与"仍判重"。
+
+
+def test_tools_node_runs_batch_concurrently_and_still_dedupes():
+    import asyncio
+    import time
+
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.agent.graph import _build_graph
+
+    events: list[str] = []
+
+    class SlowTool:
+        def __init__(self, name: str):
+            self.name = name
+
+        async def ainvoke(self, args):
+            events.append(f"start:{self.name}")
+            await asyncio.sleep(0.05)
+            events.append(f"end:{self.name}")
+            return [{"type": "text", "text": f"{self.name} 的结果"}]
+
+    class StubLLM:
+        """第一轮吐 3 个 tool_calls（其中第 3 个与第 1 个完全相同），之后给最终答案。"""
+
+        def __init__(self):
+            self.calls = 0
+
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "t_a", "args": {"q": "1"}, "id": "c1"},
+                        {"name": "t_b", "args": {"q": "2"}, "id": "c2"},
+                        {"name": "t_a", "args": {"q": "1"}, "id": "c3"},  # 与 c1 完全相同
+                    ],
+                )
+            return AIMessage(content="最终答案")
+
+    graph = _build_graph(
+        StubLLM(), [SlowTool("t_a"), SlowTool("t_b")], checkpointer=InMemorySaver()
+    )
+    start = time.perf_counter()
+    out = asyncio.run(
+        graph.ainvoke(
+            {"messages": [HumanMessage(content="hi")]},
+            config={"configurable": {"thread_id": "t"}},
+        )
+    )
+    elapsed = time.perf_counter() - start
+
+    # 1) 并发：两个工具都"开始"了才出现第一个"结束"（串行时事件必然是 start/end 交替）
+    assert events[:2] == ["start:t_a", "start:t_b"], f"工具调用没有并发执行：{events}"
+    # 2) 串行两次 0.05s×2=0.1s；并发约 0.05s。给足余量，只断言"明显快于串行"
+    assert elapsed < 0.09, f"耗时 {elapsed:.3f}s 接近串行(0.1s)，并发可能没生效"
+
+    tool_messages = [m for m in out["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_messages) == 3, "每个 tool_call 都应有一条 ToolMessage（顺序与 id 对应）"
+    assert [m.tool_call_id for m in tool_messages] == ["c1", "c2", "c3"]
+    # 3) 判重仍然生效：第 3 个（与第 1 个同工具同参数）必须被跳过，且没有真的再跑一遍
+    assert "检测到重复工具调用" in tool_messages[2].content
+    assert "检测到重复工具调用" not in tool_messages[0].content
+    assert events.count("start:t_a") == 1, f"重复调用被真的执行了：{events}"
+
+    # 4) 最终答案仍取到（图能正常收敛）
+    from app.agent.graph import _final_answer
+
+    assert _final_answer(out["messages"]) == "最终答案"
+
+
+# —— 索引健壮性：损坏的 sidecar 不能让服务永久 503 ——
+# 背景（已实测复现）：index_docs.py 被中途 Ctrl-C 会留下半截 chunks.jsonl。
+# 原实现 is_indexed() 只看"文件在不在 + 向量数>0"，于是 is_indexed() 恒 True、
+# ensure_ready() 恒抛 JSONDecodeError → 每个请求都 503，且**永远不会触发自动重建**。
+
+
+def _pipeline_with_sidecar(tmp_path, monkeypatch, sidecar_text: str, count: int = 3):
+    from app.config import settings
+    from app.retrieval.pipeline import RetrievalPipeline
+
+    chroma = tmp_path / "chroma"
+    chroma.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(settings, "chroma_path", str(chroma), raising=False)
+    (chroma / "chunks.jsonl").write_text(sidecar_text, encoding="utf-8")
+
+    class FakeStore:
+        def reset(self) -> None:
+            pass
+
+        def add(self, chunks) -> None:
+            pass
+
+        def count(self) -> int:
+            return count
+
+    return RetrievalPipeline(embedder=object(), vector_store=FakeStore())
+
+
+def test_index_not_considered_ready_when_sidecar_is_truncated(tmp_path, monkeypatch):
+    import json
+
+    good = json.dumps({"content": "规则", "source": "a.md", "chunk_id": "a.md#recursive#0"}, ensure_ascii=False)
+    torn = good[:-5]  # 模拟被 Ctrl-C 截断的最后一行
+    pipeline = _pipeline_with_sidecar(tmp_path, monkeypatch, good + "\n" + torn)
+
+    # 关键：文件存在、向量数也 >0，但内容读不出来 → 必须判为"没有可用索引"
+    assert pipeline.is_indexed() is False
+    # 于是会走到"索引不存在"这条**可恢复**的分支，而不是把 JSONDecodeError 抛给每个请求
+    with pytest.raises(RuntimeError, match="索引不存在"):
+        pipeline.ensure_ready(auto_index=False)
+
+
+def test_index_not_considered_ready_when_sidecar_is_empty(tmp_path, monkeypatch):
+    pipeline = _pipeline_with_sidecar(tmp_path, monkeypatch, "")
+    assert pipeline.is_indexed() is False
+    with pytest.raises(RuntimeError, match="索引不存在"):
+        pipeline.ensure_ready(auto_index=False)
+
+
+def test_ensure_ready_reports_mismatch_instead_of_dividing_by_zero(tmp_path, monkeypatch):
+    """sidecar 有分块、向量库却是空的：给出可读报错，而不是 rank_bm25 的 ZeroDivisionError。"""
+    import json
+
+    sidecar = json.dumps({"content": "规则", "source": "a.md", "chunk_id": "a.md#recursive#0"}, ensure_ascii=False)
+    pipeline = _pipeline_with_sidecar(tmp_path, monkeypatch, sidecar, count=0)
+    assert pipeline.is_indexed() is False
+    with pytest.raises(RuntimeError, match="向量库为空"):
+        pipeline.ensure_ready(auto_index=False)
+
+
+def test_index_publishes_sidecar_atomically(tmp_path, monkeypatch):
+    """sidecar 必须原子发布：不留下 .tmp，且内容可被 JSON 逐行解析。"""
+    import json
+
+    from app.config import settings
+    from app.retrieval.pipeline import RetrievalPipeline
+
+    chroma = tmp_path / "chroma"
+    monkeypatch.setattr(settings, "chroma_path", str(chroma), raising=False)
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "d.md").write_text("制度正文。" * 60, encoding="utf-8")
+
+    class FakeStore:
+        def reset(self) -> None:
+            pass
+
+        def add(self, chunks) -> None:
+            pass
+
+        def count(self) -> int:
+            return 0
+
+    pipeline = RetrievalPipeline(embedder=object(), vector_store=FakeStore())
+    pipeline.index(str(docs), method="fixed")
+
+    assert (chroma / "chunks.jsonl").is_file()
+    assert not list(chroma.glob("*.tmp")), "原子发布不应留下临时文件"
+    for line in (chroma / "chunks.jsonl").read_text(encoding="utf-8").splitlines():
+        json.loads(line)

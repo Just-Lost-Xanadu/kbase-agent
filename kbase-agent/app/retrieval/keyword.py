@@ -62,7 +62,10 @@ class BM25Index:
 
         BM25（rank_bm25 的 Okapi 变体）根据词频/TF-IDF 加权给整句打分：命中词的 chunk 分高。
         注意：返回分数可能含很多接近 0 的低分——因为 BM25 对完全无关的 chunk 也给一个小正分；
-        是否过滤 min-score 是本项目已知取舍（README/LEARNING 提到可加 IDF 下限），当前保留 top_k 排序即可。
+        是否过滤 min-score 是本项目已知取舍（可加 IDF 下限或分数阈值），当前保留 top_k 排序即可。
+        另：本集合的实测消融（vector-only / BM25-only / RRF 三路都是 1.0）说明该金标集
+        没有区分度，因此"BM25 补了向量补不到的召回"这句话在本项目里**没有被数据证明**，
+        只作为设计动机陈述（见 kbase-agent/README.md「效果度量」）。
         """
         scores = self._model.get_scores(tokenize(query))
         ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]

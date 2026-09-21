@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS run_traces (
 CREATE INDEX IF NOT EXISTS idx_run_traces_started ON run_traces(started_at);
 """
 
+# 增量迁移：已有的 checkpoints.sqlite 是 CREATE TABLE IF NOT EXISTS 建出来的，
+# 加字段不会自动生效（IF NOT EXISTS 遇到已存在的表直接跳过）。所以新增列必须显式 ALTER。
+# 口径：run_traces.sources 存"答案真实引用"，retrieved_sources 存"本轮检索命中"——
+# 两者是不同口径（见 app/agent/graph.py 的 _parse_citations 说明），不能共用一列。
+MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("run_traces", "retrieved_sources", "ALTER TABLE run_traces ADD COLUMN retrieved_sources TEXT"),
+)
+
+# get_trace 的显式列清单：原先用 `SELECT *` + 位置 zip，任何一次加列（就像上面这条迁移）
+# 都会让取值整体错位或直接 KeyError。这里改成显式列出，加列时必须同步改这里。
+TRACE_COLUMNS = (
+    "id", "conversation_id", "question", "answer", "sources", "retrieved_sources",
+    "steps", "prompt_tokens", "completion_tokens", "total_tokens",
+    "cost_cny", "duration_ms", "error", "started_at",
+)
+
 
 async def _conn() -> aiosqlite.Connection:
     db = await aiosqlite.connect(DB_PATH)
@@ -61,12 +77,18 @@ async def _conn() -> aiosqlite.Connection:
 
 
 async def init_db() -> None:
-    """建表并确保 WAL（幂等，服务启动时调用一次）。"""
+    """建表、跑增量迁移并确保 WAL（幂等，服务启动时调用一次）。"""
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     db = await _conn()
     try:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.executescript(SCHEMA)
+        for table, column, ddl in MIGRATIONS:
+            cur = await db.execute(f"PRAGMA table_info({table})")
+            existing = {row[1] for row in await cur.fetchall()}
+            await cur.close()
+            if column not in existing:
+                await db.execute(ddl)
         await db.commit()
     finally:
         await db.close()
@@ -190,23 +212,28 @@ async def save_trace(
     recorder_summary: dict,
     answer: str,
     sources: list[str],
+    retrieved_sources: list[str] | None = None,
 ) -> None:
-    """持久化一次 Agent 运行的 trace（观测用，与消息记录互不影响）。"""
+    """持久化一次 Agent 运行的 trace（观测用，与消息记录互不影响）。
+
+    sources / retrieved_sources 是两个口径（答案引用 vs 检索命中），分别入列，不合并。
+    """
     db = await _conn()
     try:
         await db.execute(
             """
             INSERT INTO run_traces
-                (conversation_id, question, answer, sources, steps,
+                (conversation_id, question, answer, sources, retrieved_sources, steps,
                  prompt_tokens, completion_tokens, total_tokens,
                  cost_cny, duration_ms, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 conversation_id,
                 recorder_summary.get("question", ""),
                 answer,
                 json.dumps(sources, ensure_ascii=False) if sources else None,
+                json.dumps(retrieved_sources, ensure_ascii=False) if retrieved_sources else None,
                 json.dumps(recorder_summary.get("steps", []), ensure_ascii=False),
                 recorder_summary.get("prompt_tokens", 0),
                 recorder_summary.get("completion_tokens", 0),
@@ -259,7 +286,7 @@ async def get_trace(trace_id: int) -> dict | None:
     db = await _conn()
     try:
         cur = await db.execute(
-            "SELECT * FROM run_traces WHERE id = ?", (trace_id,)
+            f"SELECT {', '.join(TRACE_COLUMNS)} FROM run_traces WHERE id = ?", (trace_id,)
         )
         row = await cur.fetchone()
         await cur.close()
@@ -267,14 +294,9 @@ async def get_trace(trace_id: int) -> dict | None:
         await db.close()
     if row is None:
         return None
-    cols = [
-        "id", "conversation_id", "question", "answer", "sources",
-        "steps", "prompt_tokens", "completion_tokens", "total_tokens",
-        "cost_cny", "duration_ms", "error", "started_at",
-    ]
-    data = dict(zip(cols, row))
+    data = dict(zip(TRACE_COLUMNS, row))
     data["cost_cny"] = round(data["cost_cny"] or 0.0, 4)
-    for key in ("sources", "steps"):
+    for key in ("sources", "retrieved_sources", "steps"):
         try:
             data[key] = json.loads(data[key]) if data[key] else []
         except (json.JSONDecodeError, TypeError):

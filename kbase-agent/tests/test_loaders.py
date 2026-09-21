@@ -76,3 +76,48 @@ def test_load_pdf_fixture(tmp_path):
     docs = load_documents(docs_dir)
     assert docs and docs[0]["source"] == "sample.pdf"
     assert "10th" in docs[0]["content"]
+
+
+def test_xlsx_empty_cells_keep_their_column_position(tmp_path):
+    """空格必须占位。
+
+    回归背景：原先写成 `[str(v) for v in row if v is not None]`，空格被直接删掉，
+    于是 `[None, 400, '北京']` 渲染成 `400 | 北京`——400 落到了"城市"列的位置，
+    表头与数据整体错位，模型会把数值归到错误的列上而且答得很自信。
+    """
+    import openpyxl
+
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "差旅"
+    ws.append(["城市", "金额", "备注"])
+    ws.append([None, 400, "北京"])          # 首列为空
+    ws.append(["上海", None, None])          # 后两列为空
+    wb.save(str(docs_dir / "差旅表.xlsx"))
+
+    text = {d["source"]: d["content"] for d in load_documents(docs_dir)}["差旅表.xlsx"]
+    lines = [ln for ln in text.splitlines() if "|" in ln]
+    # 表头 + 两行数据，且列数一致（错位时行内容会塌成两段）
+    assert lines[0] == "城市 | 金额 | 备注"
+    assert lines[1] == " | 400 | 北京"
+    assert lines[2] == "上海 |  | "
+    assert all(ln.count("|") == 2 for ln in lines), "每一行的分隔符个数必须一致，否则列就错位了"
+
+
+def test_loader_logs_skipped_documents(tmp_path, caplog):
+    """跳过任何文件都必须留日志——静默丢文档是 RAG 最难查的一类问题。"""
+    import logging
+
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "ok.md").write_text("正常文档", encoding="utf-8")
+    # GBK 编码的中文 txt：拷到别的机器上就是这么来的，直读会 UnicodeDecodeError
+    (docs_dir / "gbk.txt").write_bytes("中文备注".encode("gbk"))
+
+    with caplog.at_level(logging.WARNING):
+        docs = load_documents(docs_dir)
+
+    assert [d["source"] for d in docs] == ["ok.md"]
+    assert "gbk.txt" in caplog.text, f"跳过 gbk.txt 没有打日志：{caplog.text!r}"
