@@ -113,7 +113,9 @@ def query_business_db(question: str) -> str:
             f"问题中出现了多个员工姓名（{'、'.join(matched_names)}），身份不唯一，"
             "请一次只询问一位员工。"
         )
-    matched = next(r for r in records if r["name"] == matched_names[0])
+    # 与上面那行同一口径：这里也必须用 .get("name")——records.jsonl 是面向用户可编辑的数据文件，
+    # 只要混进一条没有 name 键、且排在命中记录之前的行，直接下标就会 KeyError（工具直接报错）。
+    matched = next(r for r in records if r.get("name") == matched_names[0])
     return json.dumps(
         {
             "employee": matched["name"],

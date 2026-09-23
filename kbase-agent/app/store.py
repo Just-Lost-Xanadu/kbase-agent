@@ -145,7 +145,9 @@ async def list_sessions(limit: int = 50) -> list[dict]:
                      WHERE m.conversation_id = c.id
                      ORDER BY m.id DESC LIMIT 1) AS last_content
             FROM conversations c
-            ORDER BY c.updated_at DESC
+            -- 二级键 id：updated_at 由 datetime('now','localtime') 生成、精度只到秒，
+            -- 演示里"连续两次新建会话"落在同一秒很常见，只按 updated_at 排会得到不确定顺序
+            ORDER BY c.updated_at DESC, c.id DESC
             LIMIT ?
             """,
             (limit,),

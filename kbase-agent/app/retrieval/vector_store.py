@@ -50,15 +50,32 @@ class VectorStore:
         用 `recursive`/`fixed` 做对比实验得到的结论直接失效。
         （已实测：先 recursive 再 fixed，向量库 23 条而 sidecar 13 条，库内 method 分布为
         {'recursive': 10, 'fixed': 13}。）
+
+        为什么先判存在、而不是 `delete_collection` 后再 `except Exception: pass`：
+        吞掉所有异常只在"collection 本来就不存在"时是等价的；文件被占用/权限/磁盘错误
+        同样会抛异常，被吞掉之后 `self._collection = None` 会让随后的 add() 重新
+        `get_or_create_collection` 拿到**同一个旧 collection** 去 upsert —— 上面那段
+        "旧切片永久残留、两路口径不一致"就会以"日志显示成功"的方式静默发生。
+        所以这里只把"不存在"当成功，其余异常照常上抛（失败要能看见）。
         """
-        try:
+        if self._collection_exists():
             self.client.delete_collection(name=settings.collection_name)
-        except Exception:  # noqa: BLE001
-            # collection 不存在时 delete 会报错——"没东西可删"就是我们要的结果，忽略
-            pass
         self._collection = None
 
+    def _collection_exists(self) -> bool:
+        """collection 是否已存在。列举本身失败属于真实故障，直接上抛，不能当成"不存在"。"""
+        return any(
+            collection.name == settings.collection_name
+            for collection in self.client.list_collections()
+        )
+
     def count(self) -> int:
+        """当前 collection 的向量条数。
+
+        这里仍然把"读不出来"和"确实是空"合并成 0，是**有意**的：调用方 `is_indexed()`
+        本来就 `except Exception: return False`，两者都会走到"服务自动重建索引"这条
+        自愈路径上（等价结果，没必要分两套）。真正需要区分成功/失败的是 reset()，见上。
+        """
         try:
             self._ensure_collection()
             return self._collection.count()

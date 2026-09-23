@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -119,7 +120,17 @@ class RetrievalPipeline:
         )
         self.vector_store.reset()
         self.vector_store.add(chunks)
-        os.replace(tmp, sidecar)   # 向量写成功之后才发布 sidecar
+        try:
+            os.replace(tmp, sidecar)   # 向量写成功之后才发布 sidecar
+        except OSError:
+            # 这是本条链上唯一可能失败的一步（Windows 下目标文件被别的进程占用、磁盘满等），
+            # 而 MCP 子进程每次工具调用都会读这个 sidecar。失败时的状态是"collection 已是新分块、
+            # sidecar 还是旧的"——两路检索口径不一致，而 is_indexed()（sidecar 可读 + count>0）
+            # 仍返回 True，服务不会自愈。所以把旧 sidecar 一并删掉：is_indexed() 变 False，
+            # 下一个请求就会自动重建，而不是把错乱状态一直留在盘上。
+            with contextlib.suppress(OSError):
+                sidecar.unlink()
+            raise
         self._bm25 = BM25Index(chunks)
         self._ready = True
         print(

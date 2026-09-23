@@ -46,7 +46,12 @@ if (-not (Test-Path "$Root\.venv\Scripts\python.exe")) {
 
 # ---------- 3. 依赖 ----------
 Step "3/5 检查依赖（缺失才安装，首次较久）"
-& $python -c "import fastapi, langgraph, chromadb, mcp" 2>$null
+# 预检必须 import 应用**真正会用到的模块**，不能只挑四个顶层包：aiosqlite 与
+# langgraph-checkpoint-sqlite 是 app.store / app.agent.graph 的直接依赖，缺了照样能过
+# "import fastapi, langgraph, chromadb, mcp" 这一关——于是脚本打印"依赖已就绪"，
+# 服务也能起来、/api/health 也返回 200，但每个对话请求都 503（Agent 引擎未就绪）。
+# 这里改成纯 import 应用模块：不启动服务，却能提前暴露这类"装了一半"的环境。
+& $python -c "import app.main, app.agent.graph, app.mcp.servers" 2>$null
 if ($LASTEXITCODE -ne 0) {
     # 先用 requirements.lock 复现"已验证可跑"的依赖组合：langgraph/langchain/chromadb 大版本
     # 变动快，直接 pip install -e . 可能装到不兼容的新版本；lock 装失败（如老版本在此平台

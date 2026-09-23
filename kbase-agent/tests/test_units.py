@@ -346,9 +346,9 @@ def test_index_resets_vector_store_before_adding(tmp_path, monkeypatch):
 
 # —— sources 语义：答案引用 ≠ 检索命中 ——
 # 背景（已实测）：字段 `sources` 原本是"本轮工具返回过的来源"（top_k 命中里的文件名），
-# 而前端把它渲染成"来源："标签。复核 9 条 trace，**9/9 都比答案正文实际引用的多 1 条**
-# （例：命中 ['员工手册','入职转正与离职制度']，正文只标了【来源：员工手册】）——
-# 等于每轮都替答案多声明一篇引用。现在拆成两个字段：sources=答案引用、retrieved_sources=检索命中。
+# 而前端把它渲染成"来源："标签。复核带来源的 trace，检索口径**从不少于**答案正文实际引用
+# （改口径那次 9 条 trace 里 9 条都多 1 条）——等于每轮都替答案多声明一篇引用。
+# 现在拆成两个字段：sources=答案引用、retrieved_sources=检索命中。
 
 
 def test_parse_citations_only_reads_the_answer_text():
@@ -360,6 +360,85 @@ def test_parse_citations_only_reads_the_answer_text():
     assert _parse_citations("【来源：a.md】\n【来源：a.md】") == ["a.md"]
     assert _parse_citations("没有标注来源的答案") == []
     assert _parse_citations("") == []
+
+
+def test_parse_citations_splits_multiple_sources_written_in_one_bracket():
+    """`【来源：A、B、C】` 要拆成三项，不能当成一个复合串。
+
+    实测库里就有这种行（`'薪酬与绩效制度_示例.md、绩效系数对照表.xlsx、员工手册_示例.md'`）：
+    prompt 只要求"用【来源：文件名】列出引用"，没规定一篇一个括号，模型两种写法都会出现。
+    不拆的话 sources 变成单元素复合串，前端渲染成一个标签、按 len(sources) 统计的消费方也数错。
+    """
+    from app.agent.graph import _parse_citations
+
+    assert _parse_citations("结论。\n\n【来源：a.md、b.md、c.md】") == ["a.md", "b.md", "c.md"]
+    assert _parse_citations("【来源：a.md, b.md;c.md/d.md】") == ["a.md", "b.md", "c.md", "d.md"]
+    assert _parse_citations("【来源：a.md，b.md】") == ["a.md", "b.md"]
+    # 拆分后仍要去重、保序
+    assert _parse_citations("【来源：a.md、b.md】\n【来源：a.md】") == ["a.md", "b.md"]
+
+
+def test_services_init_is_single_flight_even_if_first_caller_is_cancelled(monkeypatch):
+    """首个请求在初始化途中被取消时，第二个请求不能把全量建索引再跑一遍。
+
+    背景：`asyncio.to_thread` 的取消只是"放弃 await"，线程会继续跑到底；老实现里
+    `async with lock` 会随取消一起退出（services_ok 还没置位），下一个请求重新进临界区、
+    is_indexed() 仍为 False → 第二次 index()：两个线程同时 reset/add 同一个 collection、
+    同时写同一个 chunks.jsonl.tmp，留下半截 sidecar 与对不上的分块/向量数。
+    """
+    import asyncio
+    import threading
+    import time
+
+    from fastapi import FastAPI
+
+    from app import services
+
+    calls = {"index": 0, "ready": 0}
+    started = threading.Event()
+
+    class _StubPipeline:
+        def is_indexed(self) -> bool:
+            return False
+
+        def index(self) -> None:
+            calls["index"] += 1
+            started.set()
+            time.sleep(0.2)
+
+        def ensure_ready(self) -> None:
+            calls["ready"] += 1
+
+    monkeypatch.setattr(
+        "app.retrieval.pipeline.RetrievalPipeline", lambda *a, **k: _StubPipeline()
+    )
+    monkeypatch.setattr("app.mcp.servers.set_pipeline", lambda pipeline: None)
+
+    async def _fake_create_runtime():
+        return object()
+
+    monkeypatch.setattr("app.agent.graph.create_runtime", _fake_create_runtime)
+
+    app = FastAPI()
+
+    async def scenario():
+        first = asyncio.create_task(services.ensure_services(app))
+        # 等初始化真正进到 to_thread 里的 index()，再取消第一个调用者
+        for _ in range(200):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert started.is_set(), "初始化没能开始"
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        # 第二个请求：应当等同一个初始化 task，而不是自己重跑一遍
+        return await services.ensure_services(app)
+
+    pipeline, runtime = asyncio.run(scenario())
+    assert calls["index"] == 1, f"初始化被并发重跑了 {calls['index']} 次"
+    assert calls["ready"] == 1
+    assert pipeline is not None and runtime is not None
 
 
 def test_result_separates_answer_citations_from_retrieved_sources():

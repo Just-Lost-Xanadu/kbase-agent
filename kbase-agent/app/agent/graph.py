@@ -126,6 +126,8 @@ def _parse_sources(messages: list) -> list[str]:
 
 
 _CITATION_RE = re.compile(r"【来源：([^】]+)】")
+# 同一个【来源：…】括号内的多个文件名分隔符（模型会写"A、B、C"，也可能用逗号/分号/斜杠）
+_CITATION_SPLIT = re.compile(r"[、,，;；/]+")
 
 
 def _parse_citations(answer: str) -> list[str]:
@@ -148,9 +150,14 @@ def _parse_citations(answer: str) -> list[str]:
     """
     citations: list[str] = []
     for match in _CITATION_RE.finditer(answer or ""):
-        source = match.group(1).strip()
-        if source and source not in citations:
-            citations.append(source)
+        # 一个括号里塞多篇（`【来源：A、B、C】`）要拆开：prompt 只要求"用【来源：文件名】列出引用"，
+        # 没规定一篇一个括号，模型两种写法都会出现。不拆则会返回单元素复合串
+        # （实测库里就有 `'薪酬与绩效制度_示例.md、绩效系数对照表.xlsx、员工手册_示例.md'`），
+        # 前端渲染成一个标签、按 len(sources) 统计的消费方也会数错。
+        for source in _CITATION_SPLIT.split(match.group(1)):
+            source = source.strip()
+            if source and source not in citations:
+                citations.append(source)
     return citations
 
 

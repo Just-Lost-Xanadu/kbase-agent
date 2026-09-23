@@ -327,6 +327,9 @@
       // 把它直接当作最后一个完整事件提交，避免 done 恰结尾没空行而永远解析不到。
       consumeBuffer();           // 再试一次(把流内能切的全切掉)
       if (buf.trim()) submitEventText(buf);  // 无空行的尾事件兜底
+      // 诊断用的残留快照必须在清空 buf 之前取：清空之后再 slice 永远是空串，
+      // 而这条日志存在的意义正是"SSE 结束了却没拿到 done.answer"时留下现场。
+      const tail = buf.slice(-120);
       buf = '';
       throwIfNoAnswer();
       if (finalAnswer) {
@@ -337,7 +340,6 @@
         renderSources(placeholder, finalSources, finalRetrieved);
       } else {
         // 真没拿到 done.answer 时的诊断：让 F12 一眼看收到几个事件/是否有 error，方便定位
-        const tail = buf.slice(-120);   // 必须在 buf 被清空前取，否则日志里永远是空串
         console.warn('[kbase] SSE 结束但未收到 done.answer',
           { eventTotal, bufTail: tail, sseError });
         placeholder.textContent = '（空回答）';

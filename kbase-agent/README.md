@@ -40,7 +40,7 @@ app/
 eval/                  # 60 条评测集（含多跳/冲突/应拒答）+ 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测（38 项，`pytest` 实测 38 passed）
+tests/                 # smoke + 纯逻辑单测（43 项，`pytest` 实测 43 passed）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
 docs/
@@ -97,12 +97,19 @@ API：
 > - `sources` = **答案正文里真实标注的【来源：X】**，即"答案引用了哪些来源"；
 > - `retrieved_sources` = **本轮工具返回过的来源**（top_k 命中），即"检索到了什么"。
 >
-> 复核 `/api/runs` 里 9 条带来源的 trace，**9/9 都比答案正文实际引用多 1 条**
-> （例：`retrieved_sources=['员工手册_示例.md','入职转正与离职制度_示例.md']`，而正文只标了
-> `【来源：员工手册_示例.md】`）。本版本之前 `sources` 走的是"检索口径"，前端却把它渲染成
+> 复核 `/api/runs` 里带来源的 trace：**检索口径 ≥ 答案引用口径，没有一条更少**——本地库
+> 2026-09-23 快照实测 13 条新口径 trace 中 **6 条 `retrieved_sources` 多于答案实际引用、7 条相等、
+> 0 条更少**（例：`retrieved_sources=['员工手册_示例.md','入职转正与离职制度_示例.md']`，而正文只标了
+> `【来源：员工手册_示例.md】`）；改口径之前也复核过同向结论（当时 9 条 trace、9 条都多 1 条）。
+> 本版本之前 `sources` 走的是"检索口径"，前端却把它渲染成
 > "来源："标签——等于每一轮都替答案多声明一篇引用。对一个主打"引用溯源"的项目这是硬伤，
 > 所以把 `sources` 改成引用口径、检索口径另起名字返回，信息不丢、语义不再混淆。
 > 前端也据此分两行渲染：**"引用：X"** 与弱化的 **"本轮命中未引用：Y"**。
+>
+> **历史行的口径提示**：`retrieved_sources` 是后加的列，**`GET /api/runs/{id}` 里
+> `retrieved_sources` 为 `null` 的行是旧数据**——那一行的 `sources` 存的是**检索口径**（当时的字段
+> 语义），不是引用口径。按 `retrieved_sources` 是否为空即可区分两种口径，不要拿旧行的 `sources`
+> 当"答案引用了什么"用。
 
 示例对话：问"我今年还剩几天年假？按手册能结转吗？"——Agent 会先 `retrieve_knowledge` 拿《员工手册》结转规则，再 `query_business_db` 拿张三个人剩余天数，两条来源结合作答，末尾列引用。
 
@@ -119,11 +126,11 @@ API：
 
 | 类型 | 条数 | 写法 | 判定 |
 |---|---|---|---|
-| 单源 | 48 | `expected_source` | 真值那一篇出现在 top-k 里 |
+| 单源 | 52 | `expected_source` | 真值那一篇出现在 top-k 里 |
 | 多跳 | 4 | `expected_sources`（两篇） | **每一篇都要命中**，只召回一半不算 |
 | 应拒答 | 4 | `should_refuse: true` | 没有真值来源；检索层不判命中，端到端层判"有没有编造" |
 
-每条还带 `expected_keywords`（从语料原文提取的关键事实，每条 1~2 个，用于答案内容质量评估）
+每条还带 `expected_keywords`（从语料原文提取的关键事实，每条 1~3 个，应拒答用例没有关键词，用于答案内容质量评估）
 与 `difficulty`（`多跳` / `冲突` / `单源` / `应拒答`，用于分档看指标——一个总命中率会掩盖"难例全灭"）。
 
 - `scripts/eval.py`（检索层，离线零成本）：`topk_hit_rate` 是否命中真值来源。同一脚本里的 `citation_accuracy` 与它是同一个判定（都看 top-k 来源里有没有真值文件），两个数字必然相同，不应作为两个独立指标看待。**应拒答用例不参与这两个指标**（它们没有真值），只统计条数——把它们算进分母会让指标凭空下降，那是口径 bug 不是效果变化。
