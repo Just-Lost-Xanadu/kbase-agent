@@ -17,6 +17,10 @@ RECORDS_FILE = ROOT / "data" / "business" / "records.jsonl"
 
 mcp = FastMCP("kbase-tools")
 _pipeline: RetrievalPipeline | None = None
+# records.jsonl 的解析缓存：文件小、但原先**每次调用都重读并重新 json.loads 一遍**，
+# 而它在本进程生命周期内几乎不变（只有人手工编辑才会变）。缓存 kept 住 (mtime, size)，
+# 文件被改过就自动失效——既能省掉每次调用的磁盘读，又不会让人改了数据却不生效。
+_records_cache: tuple[tuple[float, int], list[dict]] | None = None
 
 # 知识库只有"制度规则"；个人状态（年假剩余/报销进度等）在业务系统里。
 # 这样 Agent 才需要"先查知识库拿规则 -> 再查业务库拿个人数据"两次工具调用。
@@ -64,6 +68,47 @@ def _ensure_records_file() -> None:
     )
 
 
+def _load_records() -> list[dict]:
+    """读业务记录，按 (路径, mtime, size) 缓存。
+
+    缓存键里**必须带路径**：单测会把 `RECORDS_FILE` 打到各自的 tmp_path，若只用 mtime+size，
+    两个临时文件很容易撞上同一个键（新建文件大小相近），于是第二个用例会拿到上一个用例的缓存
+    ——"改了数据却不生效"和"读到别人的数据"都属这一类。带上路径后，换文件必然换键。
+
+    坏行不再让整把工具报错：某一行 JSON 写坏（手工编辑最常见）原先会让 `json.loads`
+    抛异常、工具直接返回错误文本，用户看到的是"工具失败"而不是"第 N 行坏了"。
+    现在跳过坏行并记明，其余记录照常可用。
+    """
+    global _records_cache
+    path = Path(RECORDS_FILE)
+    try:
+        stat = path.stat()
+    except OSError:
+        return []
+    key = (str(path.resolve()), stat.st_mtime, stat.st_size)
+    if _records_cache is not None and _records_cache[0] == key:
+        return _records_cache[1]
+
+    records: list[dict] = []
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(
+                f"[mcp] {path.name} 第 {lineno} 行不是合法 JSON，已跳过：{exc}",
+                file=sys.stderr,
+            )
+            continue
+        if isinstance(item, dict):
+            records.append(item)
+        else:
+            print(f"[mcp] {path.name} 第 {lineno} 行不是对象，已跳过", file=sys.stderr)
+    _records_cache = (key, records)
+    return records
+
+
 @mcp.tool()
 def retrieve_knowledge(question: str) -> str:
     """从企业知识库（员工手册 / 产品 FAQ）检索制度规则，返回带【来源：文件名】的片段。"""
@@ -88,11 +133,7 @@ def query_business_db(question: str) -> str:
     只回答"个人数据"，不含制度规则（制度请调 retrieve_knowledge）。
     必须在问题里明确员工姓名；姓名缺失或有歧义时本工具会拒绝并说明原因，不会猜测默认员工。"""
     _ensure_records_file()
-    records = [
-        json.loads(line)
-        for line in RECORDS_FILE.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    records = _load_records()
     if not records:
         return "业务系统中暂无员工记录。"
 

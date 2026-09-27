@@ -49,6 +49,9 @@
   /* 检索命中但答案没引用的来源：与"引用"必须视觉可区分，否则等于替答案多声明引用 */
   .sources.hit { color: #8b98a5; }
   .sources.hit span { background: #232c36; color: #8b98a5; }
+  /* 查无此据的引用：答案写了【来源：X】但本轮检索没返回过 X，属于要显眼的一类 */
+  .sources.bad { color: #fca5a5; }
+  .sources.bad span { background: #4a1d1d; color: #fca5a5; font-weight: 600; }
   #status { display: none; font-size: 12px; color: #fbbf24; padding: 0 20px 8px; }
   #chips { display: flex; gap: 8px; padding: 0 20px 10px; flex-wrap: wrap; }
   #chips button { background: #1c242e; color: #cbd5e1; border: 1px solid #2a3441; border-radius: 14px;
@@ -129,16 +132,41 @@
   // 来源分两行渲染，因为服务端给的是两个不同口径：
   //   cited     = 答案正文里真实标注的【来源：X】（= 答案引用了什么）
   //   retrieved = 本轮工具返回过的来源（= top-k 检索命中了什么）
+  //   toolCalls = 本轮实际执行的工具调用次数（0 = 本轮根本没查库）
   // 实测两者经常不一致（命中 2 篇、答案只引用 1 篇）。旧版把 retrieved 直接标成"来源："，
   // 等于在每一轮里替答案多声明一篇引用——对一个主打"引用溯源"的项目这是硬伤。
   // 所以：引用一律显示；命中里"多出来的那几篇"另起一行、弱化配色，明示未被引用。
-  function renderSources(container, cited, retrieved) {
+  //
+  // toolCalls === 0 这一支同样重要：多轮续聊里模型可能直接凭上下文作答（实测存在），
+  // 此时引用是**历史轮次**留下的，本轮并没有检索。不加说明的话，这一行的"引用：X"
+  // 看起来和真的查过库一模一样，正是"引用溯源"最不该含糊的地方。
+  //
+  // unverified 是比上面两者都严重的一类：答案写了【来源：X】，但本轮检索返回过的来源里
+  // 根本没有 X。实测真的发生过——模型甚至在括号里写了"（知识库检索失败,无制度文件可引用）"，
+  // 而那一轮两次工具调用都成功了。这种"查无此据的引用"必须单独、显眼地标出来。
+  function renderSources(container, cited, retrieved, toolCalls, unverified) {
+    // 只有拿到明确的 0 才提示：历史消息接口不返回该字段（undefined），此时不做任何判断
+    const noFreshLookup = toolCalls === 0;
+    const unverifiedSet = new Set(unverified || []);
     const cite = cited || [];
     if (cite.length) {
       const s = document.createElement('div');
       s.className = 'sources';
       s.innerHTML = cite.map(x => '<span>引用：' + esc(x) + '</span>').join('');
       container.appendChild(s);
+    }
+    if (unverifiedSet.size) {
+      const u = document.createElement('div');
+      u.className = 'sources bad';
+      u.innerHTML = [...unverifiedSet]
+        .map(x => '<span>⚠ 查无此据：' + esc(x) + '（本轮检索未返回该来源）</span>').join('');
+      container.appendChild(u);
+    }
+    if (noFreshLookup && cite.length) {
+      const n = document.createElement('div');
+      n.className = 'sources hit';
+      n.innerHTML = '<span>本轮未检索，以上引用来自之前的对话</span>';
+      container.appendChild(n);
     }
     const extra = (retrieved || []).filter(x => !cite.includes(x));
     if (extra.length) {
@@ -148,14 +176,14 @@
       container.appendChild(r);
     }
   }
-  function addMsg(role, text, sources, retrieved) {
+  function addMsg(role, text, sources, retrieved, toolCalls, unverified) {
     const tip = document.getElementById('emptyTip');
     if (tip) tip.remove();
     const div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
     // 用户输入保持原样展示；仅对 Agent 回答做 Markdown 可读化
     div.innerHTML = role === 'user' ? esc(text) : mdToHtml(text);
-    renderSources(div, sources, retrieved);
+    renderSources(div, sources, retrieved, toolCalls, unverified);
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
     return div;
@@ -245,6 +273,8 @@
     let finalAnswer = '';
     let finalSources = [];
     let finalRetrieved = [];
+    let finalToolCalls = null;
+    let finalUnverified = [];
     let sseError = null;
     let filled = false;   // 占位气泡是否已写入内容（决定 finally 里要不要移除它）
     let stepPreviewEl = null;
@@ -279,6 +309,10 @@
           finalAnswer = d.answer || '';
           finalSources = d.sources || [];
           finalRetrieved = d.retrieved_sources || [];
+          // 本轮工具调用次数：0 表示"没查库就作答了"，此时上面的引用来自历史轮次
+          finalToolCalls = typeof d.tool_calls === 'number' ? d.tool_calls : null;
+          // 答案标了、但本轮检索没返回过的来源（查无此据）
+          finalUnverified = d.unverified_sources || [];
         } catch (e) {}
       } else if (eventName === 'error') {
         try { const d = JSON.parse(dataStr); sseError = (d && d.message) || 'Agent 输出错误'; } catch (e) { sseError = 'Agent 输出错误'; }
@@ -337,7 +371,7 @@
         placeholder.className = 'msg bot';
         placeholder.innerHTML = mdToHtml(finalAnswer);
         filled = true;
-        renderSources(placeholder, finalSources, finalRetrieved);
+        renderSources(placeholder, finalSources, finalRetrieved, finalToolCalls, finalUnverified);
       } else {
         // 真没拿到 done.answer 时的诊断：让 F12 一眼看收到几个事件/是否有 error，方便定位
         console.warn('[kbase] SSE 结束但未收到 done.answer',

@@ -1,4 +1,4 @@
-# kbase-agent
+﻿# kbase-agent
 
 **企业知识库 + 工具调用 Agent（单 Agent）**：基于 LangGraph 的 ReAct 式工具循环，RAG 检索与业务工具经 **MCP 协议真接入**（stdio）；配**两层评测 Harness**（60 条金标：检索层 + 端到端回归，含多跳/冲突/应拒答三类难例）、SQLite 会话持久化、trace/成本可观测与护栏。
 
@@ -40,7 +40,7 @@ app/
 eval/                  # 60 条评测集（含多跳/冲突/应拒答）+ 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测（43 项，`pytest` 实测 43 passed）
+tests/                 # smoke + 纯逻辑单测（57 项，`pytest` 实测 57 passed）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
 docs/
@@ -86,8 +86,8 @@ python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判
 
 API：
 - `GET /api/health`：存活探针，**不依赖 key / 索引**——503 排查时先打它，能区分"服务没起来"和"Agent 引擎没就绪"。
-- `POST /api/chat`：同步返回 `{answer, sources, retrieved_sources}`。
-- `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案与两个来源字段。
+- `POST /api/chat`：同步返回 `{answer, sources, retrieved_sources, tool_calls}`。
+- `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案、两个来源字段与 `tool_calls`。
 - `GET /api/sessions` / `GET /api/sessions/{session_id}/messages`：读会话列表与历史消息（给前端"历史会话"用）。
 - `GET /api/runs` / `GET /api/runs/{id}`：运行 trace（耗时/token/成本/错误 + 节点级 steps），可观测用。
 - 请求体：`{messages:[{role,content}], session_id?}`。**同一 session 请只追加最新一条消息**（LangGraph 按 thread 自动拼历史，避免重复）。
@@ -110,6 +110,48 @@ API：
 > `retrieved_sources` 为 `null` 的行是旧数据**——那一行的 `sources` 存的是**检索口径**（当时的字段
 > 语义），不是引用口径。按 `retrieved_sources` 是否为空即可区分两种口径，不要拿旧行的 `sources`
 > 当"答案引用了什么"用。
+
+> **`tool_calls`：给上面两个字段消歧的第三个字段**（本轮实际执行的工具调用次数）。
+> 多轮续聊时模型可能**直接凭上下文作答、一次工具都不调**——实测存在：同一 session 第一轮问过
+> 年假，第二轮问"再重复一遍刚才的答案"，模型直接复述，`steps` 里只有 `agent`、没有 `tools`。
+> 此时 `retrieved_sources` 为空，**但答案正文仍写着【来源：员工手册_示例.md】**——那是历史轮次
+> 留下的引用，本轮并没有检索。只给两个列表时，消费方分不清：
+>
+> | 情形 | `retrieved_sources` | `tool_calls` | 含义 |
+> |---|---|---|---|
+> | 检索了、也命中了 | 非空 | ≥1 | 正常 |
+> | 检索了、但没命中 | 空 | ≥1 | 召回问题（该说"资料中没有"） |
+> | **本轮根本没检索** | 空 | **0** | 答案里的【来源：】来自历史轮次，**本轮没有证据** |
+>
+> 前端据此在"引用：X"下再加一行弱化提示：**"本轮未检索，以上引用来自之前的对话"**——
+> 对一个主打"引用溯源"的项目，"这条引用有没有本轮的检索证据"恰恰是最该说清的一件事。
+
+> **`unverified_sources`：查无此据的引用**（答案标了【来源：X】，但本轮检索并没有返回过 X）。
+> 这一条来自**实测到的真实缺陷**，不是假想：一次问"张三还剩几天年假？"的对话里，
+> 两次工具调用**都成功**（`retrieve_knowledge` 23ms、`query_business_db` 24ms，trace 里 `ok=True`、
+> 无 error），`retrieved_sources` 里也确实有《员工手册》——但模型在答案里写的引用是：
+>
+> ```
+> 【来源：业务系统个人数据查询结果（知识库检索失败,无制度文件可引用）】
+> ```
+>
+> 括号里那句话描述的是**一件没有发生过的事**（知识库检索并没有失败）。而修复前
+> `_parse_citations` 只是照抄模型写的字，于是这个"假来源"被当成正常引用返回给前端。
+> 对一个把"引用溯源"当核心卖点的项目，这比"引用多了/少了"严重得多：它把一次正常检索
+> 说成了失败，还把这句话冒充成了来源名。
+>
+> 现在的口径：**引用必须出现在本轮工具真正返回过的来源里**，否则进 `unverified_sources`。
+> - 基准用"本轮检索到的文件集合"而不是"语料文件全集"：检索跑在 MCP 子进程里，文件名在 API 层
+>   不可见，要拿全集就得再开一次 IO；而"本轮有没有检索到它"本来就是这两个字段要回答的问题。
+>   这个判据也更严——即便语料里真有《员工手册》，若本轮没检索到，那条引用同样**没有本轮证据**。
+> - **查无此据的条目仍留在 `sources` 里**，不替模型删改："答案写了什么"这个事实要留住，
+>   消费方按 `unverified_sources` 就能看出哪些引用站不住。前端用红色单独一行标出
+>   **"⚠ 查无此据：X（本轮检索未返回该来源）"**。
+> - **工具本轮没有任何返回时不做判定**（该字段为空）：那时所有引用都"无法验证"，但原因是
+>   工具挂了或模型没调工具，不是模型编造——混为一谈会让这个字段在故障时刷屏、失去信号意义。
+>   那种情况由 `tool_calls=0` 或 trace 里的 `ok=False` 表达。
+> - 它同样**不测**"引用得对不对"：一条引用能被验证，只说明"本轮确实检索到了这篇"，
+>   不说明"答案对该篇的转述是准确的"。所以它是一个**可验证性**字段，不是"引用准确率"。
 
 示例对话：问"我今年还剩几天年假？按手册能结转吗？"——Agent 会先 `retrieve_knowledge` 拿《员工手册》结转规则，再 `query_business_db` 拿张三个人剩余天数，两条来源结合作答，末尾列引用。
 
@@ -268,11 +310,14 @@ flowchart TD
 ## 设计要点
 
 - **框架**：LangGraph 有状态图、SQLite 断点续聊（AsyncSqliteSaver + WAL，重启不丢会话；高并发生产可换 Postgres）；选 LangGraph 而非预制 Agent 函数，是为了拿到显式状态、checkpoint 与精细护栏。
-- **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。代价是**每次工具调用都新起一个子进程**（adapters 在 `tool.ainvoke` 内部开/关会话），这也是端到端延迟的主要来源。
-- **一批工具调用并发执行**：模型在一次 assistant 消息里给出多个 `tool_call`（例如"先查制度规则 + 再查个人数据"），本就表示它们互不依赖；`tools_node` 用 `asyncio.gather` 并发跑，而不是 `for … await` 串行相加。实测两个工具 **8127ms → 4663ms（省 43%）**。并发化最容易顺手拆掉的护栏是"批内重复调用判重"（串行实现里第二个相同调用会被第一个刚写进 history 的 key 拦下），所以现在是**先整批派单判重、再并发执行、最后按模型给的原序组装消息与 trace**——`tests/test_units.py::test_tools_node_runs_batch_concurrently_and_still_dedupes` 把这三件事一起锁住。
+- **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。**一个 runtime 常驻一个 stdio 会话**（`MultiServerMCPClient.session()` + `load_mcp_tools(session)`），而不是每次调用新起子进程：实测同一台机器上 `retrieve_knowledge` 单次 **3782→12ms**（首次 683ms 付子进程内冷加载），两把工具并发 **17ms**。会话失效（子进程被 OOM/杀掉）时按**传输层异常**判定并重建，一次调用内只重试一次；工具业务报错绝不触发重建。
+- **一批工具调用并发执行 + 整轮复用同一个 MCP 会话**：模型在一次 assistant 消息里给出多个 `tool_call`（例如"先查制度规则 + 再查个人数据"），本就表示它们互不依赖；`tools_node` 用 `asyncio.gather` 并发跑，而不是 `for … await` 串行相加。并发化最容易顺手拆掉的护栏是"批内重复调用判重"（串行实现里第二个相同调用会被第一个刚写进 history 的 key 拦下），所以现在是**先整批派单判重、再并发执行、最后按模型给的原序组装消息与 trace**——`tests/test_units.py::test_tools_node_runs_batch_concurrently_and_still_dedupes` 把这三件事一起锁住。
+  - 并发只解决"多个调用之间"，不解决"每次调用都要新起子进程"。真正的延迟大头是后者：`get_tools()` 返回的工具**无会话**，它的 `ainvoke` 内部会 `create_session` 新起一个 stdio 子进程、握手、调用、关掉——于是每次工具调用都要重付"解释器启动 + `import chromadb/onnxruntime`（约 3.0s）+ 子进程内冷加载 BM25/Chroma（约 0.68s）"。改成**常驻会话**后实测：`retrieve_knowledge` 首次 683ms、之后 **11~12ms**，两把工具并发 **17ms**。这把"每轮 1~2 次工具调用"从约 3.7~7.5s 压到约 15~700ms，端到端 p50 因此由约 6.6s 降到约 2s。
+  - 常驻会话自带的失败面（子进程死掉）也一并处理：只在**传输层异常**（`anyio.ClosedResourceError` / `BrokenResourceError` / `EndOfStream`，及 SDK 换异常类型时的等价文本）时把当前代会话判死并重建，单次调用内重试一次；工具业务报错（检索异常、业务库没这个人）**不会**触发重建——否则一次正常报错会被放大成一次子进程重启。回归测试：`test_tool_session_reuses_one_session_for_many_calls` / `test_tool_session_rebuilds_only_on_transport_failure` / `test_tools_node_self_heals_when_session_dies` / `test_tools_node_does_not_rebuild_session_on_business_error`。
 - **RAG**：混合检索（向量 + BM25 做 RRF）做粗召回 + 可选重排 + 引用溯源；**语料 39 篇 / 40 分块，检索层有真实区分度**（仅向量 0.875、仅 BM25 0.964、RRF 0.982），坏例能说清差在哪一条、为什么差。
 - **工程化**：SSE 节点级流式、护栏（死循环/超时/上下文截断/重复调用）、懒加载与多轮状态管理。
-- **效果与成本**：60 条金标两层 Harness（含多跳/冲突/应拒答三类难例；`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；最近一轮基线（`corpus-v2`，2026-09-21，39 篇语料）实测：检索层 `topk_hit_rate` 0.9821、端到端引用覆盖 55/56、应拒答 4/4、延迟 p50 ≈ 6.6s / p95 ≈ 7.9s、单条成本 ≈ ¥0.0074。`/api/runs` 有节点级 trace 可逐条归因（**延迟大头仍是每条新起 MCP stdio 子进程 + LLM 往返**，不是检索）。
+- **效果与成本**：60 条金标两层 Harness（含多跳/冲突/应拒答三类难例；`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；最近一轮基线（`corpus-v2`，2026-09-21，39 篇语料）实测：检索层 `topk_hit_rate` 0.9821、端到端引用覆盖 55/56、应拒答 4/4、延迟 p50 ≈ 6.6s / p95 ≈ 7.9s、单条成本 ≈ ¥0.0074。`/api/runs` 有节点级 trace 可逐条归因，`steps` 里现在带 `tool_calls`/`tool_args`（能直接看出这一步调了哪把工具、传了什么参数）。
+  常驻 MCP 会话上线后（本机实测，同一份语料、同样问法）：**单次 `tools` 步由约 3.9s 降到 13~16ms**，端到端 **p50 由约 6.6s 降到约 2s**（同一批问法改动前 4413~6188ms → 改动后 1790~2421ms；首轮另含约 13s 的索引/嵌入冷加载，那是进程级一次性成本）。**剩下的延迟大头已经变成 LLM 往返**（agent 步 480~1660ms × 2~3 次），不再是工具调用——这是"打对了地方"的又一个可验证形状。
 
 ## 容器化部署设计（**未实施**，方案已想清）
 
@@ -318,9 +363,10 @@ flowchart TD
 
 - **Anaconda 下 onnxruntime 报 `DLL load failed`**：是 Anaconda 自带旧版 VC 运行库（vcruntime140/msvcp140≈14.29）盖过了系统新版。执行 `conda update -n base -c conda-forge -y vs2015_runtime` 一次即可（torch/bge 同理会遇到）。
 - 首次跑 `scripts/index_docs.py` 会从 HuggingFace 下载 embedding 模型（几十 MB）；**换 embedding 模型后必须重建索引**（重跑 `index_docs.py` 即可，它会先清空 collection）。
-- 每个 MCP 工具调用都会新起一个 stdio 子进程（真 MCP 的代价，adapters 在 `tool.ainvoke` 内部开/关会话）；演示规模无所谓，要提速可把 `app/mcp/servers.py` 改成进程内直连——但那会**放弃本项目的核心卖点**（真协议边界），所以留作取舍而不是默认做法。**这是延迟的主要来源**：单次 `retrieve_knowledge` 实测约 4.7s，其中大部分是子进程启动 + 冷加载 BM25/Chroma。
-  - 已经做掉的一步是**同一批的多个工具调用并发执行**（见「设计要点」），实测两个工具 8127ms → 4663ms；
-  - 还没有做的一步是**让一个 runtime 复用一个常驻 stdio 会话**（`MultiServerMCPClient.session()` 已提供、`AgentRuntime` 也已经持有生命周期），那样每次调用就不必再付解释器启动 + 索引加载的钱，且**不破坏"真 MCP"这个属性**。这是目前性价比最高的下一步，**未实施**，不写进"已完成"。
+- 每个 MCP 工具调用都会新起一个 stdio 子进程（真 MCP 的代价，adapters 在 `tool.ainvoke` 内部开/关会话）；演示规模无所谓，要提速可把 `app/mcp/servers.py` 改成进程内直连——但那会**放弃本项目的核心卖点**（真协议边界），所以留作取舍而不是默认做法。
+  - **已做掉的第一步**是**同一批的多个工具调用并发执行**（见「设计要点」），实测两个工具 8127ms → 4663ms；
+  - **已做掉的第二步（本轮）**是**让一个 runtime 复用同一个常驻 stdio 会话**：`MultiServerMCPClient.session()` 提供常驻会话、`load_mcp_tools(session)` 把工具绑上去，于是每次调用不必再付解释器启动 + 索引加载的钱，**且完全不破坏"真 MCP"这个属性**（走的仍是标准 JSON-RPC over stdio，只是不再一次一进程）。实测 `retrieve_knowledge` 3782/3643/3676ms → **683ms（首次）/ 11~12ms（之后）**，`query_business_db` 2887ms → 同量级；两把工具并发 17ms。
+  - 仍未做的：把会话做成"多进程/多副本共享"（当前是**每个 runtime 一个子进程**，单副本单进程的部署形态下正合适；多副本要各自持有一个会话，或改成可远程连接的 MCP transport）。
 - 索引的 sidecar（`data/chroma/chunks.jsonl`）是**原子发布**的（写 `.tmp` 再 `os.replace`），且 `is_indexed()` 会把"读不出来的 sidecar"判为"没有索引"从而触发自动重建。改之前，`index_docs.py` 中途 Ctrl-C 留下的半截文件会让 `is_indexed()` 一直为真、`ensure_ready()` 一直抛 `JSONDecodeError`，服务对每个请求都回 503 且**永不自动恢复**（已实测复现）。
 
 ## 许可证

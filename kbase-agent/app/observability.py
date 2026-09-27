@@ -40,6 +40,13 @@ class Step:
     cost_cny: float = 0.0           # 该次估算成本（由 estimate_cost 折算）
     ok: bool = True                 # 是否成功（异常节点置 False）
     note: str = ""
+    # tools 步才有：这一步实际调了哪把工具、传了什么参数。
+    # 为什么必须单独存：所有 tools 步的 node 都是 "tools"、name 在旧数据里也是 "tools"，
+    # 只看 trace 分不出"这步查的是知识库还是业务库"，排查延迟/坏例时只能靠顺序猜。
+    # 用 list 而不是单个 str：一次 tool_calls 批次里可能有多个调用，一步一个 Step 会在
+    # "并发派单"下丢失配对关系（哪个耗时对应哪把工具）。
+    tool_calls: list[str] = field(default_factory=list)
+    tool_args: list[dict] = field(default_factory=list)
 
 
 class Recorder:

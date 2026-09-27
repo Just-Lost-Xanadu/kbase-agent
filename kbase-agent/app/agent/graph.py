@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import contextlib
 import json
 import re
 import sys
@@ -30,6 +31,197 @@ from app.guardrails import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# ---- MCP 工具会话：一个常驻 stdio 子进程，而不是"每次调用新起一个" ----
+#
+# 背景（本模块最重要的一次性能改动，实测数字见 README）：
+# `MultiServerMCPClient.get_tools()` 返回的 LangChain 工具是**无会话**的——它的
+# `ainvoke` 内部会 `create_session(...)` 新起一个 stdio 子进程、握手、调用、再关掉。
+# 于是每次工具调用都要重新付一遍：解释器启动 + `import chromadb/onnxruntime` +
+# 子进程内 BM25/Chroma 冷加载。实测 `retrieve_knowledge` 单次 3.6~3.8s（三次 3782/3643/3676ms），
+# 其中子进程启动约 3.0s、子进程内冷加载约 0.68s。一次回答调 1~2 把工具，延迟大头就在这里。
+#
+# `client.session(server)` 提供的是**常驻会话**，用 `load_mcp_tools(session)` 绑定上去之后，
+# 同一进程内后续每次调用只需一次 stdio 往返。实测同一台机器：首次 683ms（子进程内冷加载），
+# 之后 **11~12ms**，两个工具并发 **17ms**。
+#
+# 这里额外做两件事，都不是"新功能"，而是常驻会话自带的失败面必须补上：
+#   1) 失败自愈：子进程被 OOM/手工杀掉后，会话即失效。若只把死会话一直握着，
+#      服务会**永久**对每个请求回"工具调用失败"，只能重启进程——这与项目
+#      "索引坏了自动重建"的既有口径不一致。所以这里在传输层失败时把会话标记为失效，
+#      下一次派单前重建（重建时整个工具表一起换掉）。
+#   2) 只对**传输层**失败重建：工具业务错误（检索抛异常、业务库没这个人）绝不能
+#      触发重建——那会把一次正常报错放大成一次子进程重启。
+
+# 传输层失败：子进程死掉/管道关闭时 MCP SDK 抛的那几类。故意不含 asyncio.TimeoutError——
+# 工具超时只说明这一次调用慢，会话本身通常还活着（`retrieve_knowledge` 冷加载实测 683ms，
+# 而单步超时是 120s），因超时重建会把"慢"升级成"重启"。
+try:  # pragma: no cover - anyio 是 mcp 的传递依赖，正常一定在
+    import anyio
+
+    _TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
+        anyio.ClosedResourceError,
+        anyio.BrokenResourceError,
+        anyio.EndOfStream,
+    )
+except ImportError:  # pragma: no cover
+    _TRANSPORT_ERRORS = ()
+
+
+class ToolSessionStale(RuntimeError):
+    """本次工具调用命中的是**已失效**会话：会话已被别的调用判死，需要重新派单。
+
+    调用方（tools_node）据此重取一次工具表再重试，而不是把这次失败算进 trace。
+    """
+
+
+class ToolSessionUnavailable(RuntimeError):
+    """会话重建也失败了（子进程起不来、索引/依赖坏了）：如实报错，不抛给上层 502。"""
+
+
+def _is_transport_failure(exc: BaseException) -> bool:
+    """判断异常是否属于"会话/子进程死了"，而不是"工具业务逻辑报错"。"""
+    if _TRANSPORT_ERRORS and isinstance(exc, _TRANSPORT_ERRORS):
+        return True
+    # McpError 只在请求已发出但连接断了时出现（SDK 在 send_request 里对已关闭的
+    # 传输抛 ClosedResourceError，这里再兜一层字符串判断，避免因 SDK 版本换异常类型而漏判）
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        marker in text
+        for marker in ("closedresource", "brokenresource", "endofstream", "connection closed", "session is closed")
+    )
+
+
+class _Lease:
+    """一次会话占用的凭据。`generation` 用来判断"我拿到的会话是否已经被判死"。"""
+
+    __slots__ = ("tools", "by_name", "generation", "session")
+
+    def __init__(self, tools: list, generation: int, session):
+        self.tools = tools
+        self.by_name = {tool.name: tool for tool in tools}
+        self.generation = generation
+        self.session = session
+
+
+class McpToolSession:
+    """常驻 MCP stdio 会话 + 工具表，带失效自愈。
+
+    生命周期由 AgentRuntime 持有（`aclose()` 时释放）；`tools` 属性是当前有效工具表的快照，
+    调用方每次派单前用 `lease()` 现取一份——这样"工具表被整体换掉"不会让图里留着旧对象。
+    """
+
+    def __init__(self, connections: dict, session_factory=None):
+        self._connections = connections
+        # 会话工厂：默认走真 MCP stdio（`_spawn`）。抽成可注入的工厂是为了让单测能在
+        # 不拉起子进程的前提下验证"派单/并发/判重/失效重建"这套逻辑——测的是本类的状态机，
+        # 不是 MCP 传输本身（传输由集成冒烟覆盖）。
+        self._session_factory = session_factory
+        self._client = None
+        self._stack: contextlib.AsyncExitStack | None = None
+        self._session = None
+        self._tools: list = []
+        self._generation = 0
+        self._lock = asyncio.Lock()
+
+    @property
+    def tools(self) -> list:
+        return self._tools
+
+    def lease(self, generation: int | None) -> "_Lease | None":
+        """按调用方持有的 generation 取一份工具表。
+
+        - `generation is None`：调用方首次派单，拿当前的（没有就返回 None，由 ensure 去建）。
+        - generation 与当前一致：正常复用。
+        - generation 落后：说明会话在本次派单期间被判死并重建过（或正在重建）——
+          返回 None，让调用方 `ensure()` 之后重新取，避免继续用已被关闭的会话。
+        """
+        if not self._tools:
+            return None
+        if generation is None or generation == self._generation:
+            return _Lease(self._tools, self._generation, self._session)
+        return None
+
+    async def ensure(self) -> "_Lease":
+        """确保有一个可用会话，返回它的租约。已有效时是零开销（不加锁、不往返）。"""
+        if self._tools:
+            return _Lease(self._tools, self._generation, self._session)
+        async with self._lock:
+            if self._tools:  # 等锁期间别人已经建好了
+                return _Lease(self._tools, self._generation, self._session)
+            return await self._spawn()
+
+    async def invalidate(self, generation: int) -> None:
+        """把 generation 号会话判死并释放；下一代按需重建。
+
+        只处理"还活着的那一代"：并发的多个失败调用会一起走到这里，重复调用必须是幂等的，
+        否则第二个调用会把别人刚建好的新会话关掉。
+        """
+        async with self._lock:
+            if generation != self._generation:
+                return
+            self._generation += 1   # 让所有还持有旧租约的调用方在下次 lease() 时拿到 None
+            self._tools = []
+            self._session = None
+            stack, self._stack = self._stack, None
+        if stack is not None:
+            with contextlib.suppress(Exception):
+                await stack.aclose()
+
+    async def _spawn(self) -> "_Lease":
+        if self._session_factory is not None:
+            # 测试路径：工厂返回 (tools, session)，不涉及子进程。
+            # 这里同样要把失败归一成 ToolSessionUnavailable：否则 tools_node 只认这个异常，
+            # 别处抛出来的原始异常会漏到 HTTP 层变成 502（而期望行为是"降级作答"）。
+            try:
+                tools, session = await self._session_factory()
+            except Exception as exc:  # noqa: BLE001
+                raise ToolSessionUnavailable(
+                    f"MCP 工具会话建立失败：{type(exc).__name__}: {exc}"
+                ) from exc
+            self._session = session
+            self._tools = tools
+            return _Lease(tools, self._generation, session)
+
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+        from langchain_mcp_adapters.tools import load_mcp_tools
+
+        try:
+            client = self._client or MultiServerMCPClient(self._connections)
+            self._client = client
+            stack = contextlib.AsyncExitStack()
+            await stack.__aenter__()
+            try:
+                # 只连第一个（也是唯一一个）server：本项目的连接表刻意只有一个 "kbase"
+                server_name = next(iter(self._connections))
+                session = await stack.enter_async_context(client.session(server_name))
+                tools = await load_mcp_tools(session, server_name=server_name)
+            except BaseException:
+                # 建立失败要把已经开的栈收干净（子进程、stdio 管道），否则每失败一次泄漏一个进程
+                with contextlib.suppress(Exception):
+                    await stack.aclose()
+                raise
+        except Exception as exc:  # noqa: BLE001
+            raise ToolSessionUnavailable(
+                f"MCP 工具会话建立失败：{type(exc).__name__}: {exc}"
+            ) from exc
+
+        self._stack = stack
+        self._session = session
+        self._tools = tools
+        return _Lease(tools, self._generation, session)
+
+    async def aclose(self) -> None:
+        """释放常驻会话（服务关停时调用）。"""
+        async with self._lock:
+            self._generation += 1
+            self._tools = []
+            self._session = None
+            stack, self._stack = self._stack, None
+        if stack is not None:
+            with contextlib.suppress(Exception):
+                await stack.aclose()
+
 
 # ---- 图状态 AgentState（原 app/agent/state.py，并入本文件：状态定义就近其消费方）----
 
@@ -161,6 +353,44 @@ def _parse_citations(answer: str) -> list[str]:
     return citations
 
 
+def _split_verified_citations(
+    citations: list[str], retrieved: list[str]
+) -> tuple[list[str], list[str]]:
+    """把答案里标出来的引用拆成"本轮检索真的返回过"与"查无此据"两组。
+
+    为什么必须有这一步（实测到的真实缺陷，不是假想）：
+    `_parse_citations` 只是**照抄模型写的字**。模型完全可以在正文里写出一个知识库里
+    根本不存在的来源。实测一次线上对话（问"张三还剩几天年假？"）：
+
+      - 两次工具调用**都成功**（`retrieve_knowledge` 23ms、`query_business_db` 24ms，
+        trace 里 `ok=True`、无 error），`retrieved_sources` 里也确实有《员工手册》；
+      - 但模型在答案里写的却是 `【来源：业务系统个人数据查询结果（知识库检索失败,无制度文件可引用）】`
+        —— 括号里那句话描述的是**一件没发生过的事**（知识库检索没有失败）。
+
+    于是 `sources` 里出现了一个"看起来像引用、其实查无此据"的条目。对一个把"引用溯源"
+    当核心卖点的项目，这比"引用多了/少了"严重得多：它把一次正常的检索说成了失败，
+    还把这句话冒充成了来源名。所以这里做一次**可验证性**判定：
+    引用必须出现在本轮工具真正返回过的来源里，否则归入 `unverified_sources`。
+
+    为什么用"本轮检索到的文件集合"当基准，而不是"语料里的文件全集"：
+      `data/docs/` 里的文件名不在 API 层可见（检索跑在 MCP 子进程里），要拿全集就得再开一次
+      IO/依赖。而"本轮有没有检索到它"本来就是这两个字段要回答的问题，用它当基准不需要新依赖，
+      且判据更严——即便语料里真有《员工手册》，若本轮没检索到，那条引用同样**没有本轮证据**。
+
+    保留在 `sources` 里而不是直接删掉：删掉等于替模型粉饰，"答案写了什么"这个事实要留住；
+    消费方按 `unverified_sources` 就能一眼看出哪些引用站不住。
+    """
+    retrieved_set = set(retrieved)
+    # 工具因超时/异常没返回任何来源时，retrieved_set 为空，此时**不做判定**：
+    # 那种情况下所有引用都"无法验证"，但原因是工具挂了而不是模型编造，混为一谈会让
+    # 这个字段在故障时刷屏、反而失去信号意义。故障本身由 trace 的 ok=False 表达。
+    if not retrieved_set:
+        return list(citations), []
+    verified = [c for c in citations if c in retrieved_set]
+    unverified = [c for c in citations if c not in retrieved_set]
+    return verified, unverified
+
+
 def _final_answer(messages: list) -> str:
     """取"最后一条非工具调用的 AI 消息"作为答案。
 
@@ -173,10 +403,14 @@ def _final_answer(messages: list) -> str:
         if (
             getattr(message, "type", "") == "ai"
             and not getattr(message, "tool_calls", None)
-            and getattr(message, "content", "")
         ):
-            # 用 _text_of 收口：content 若是 content block 列表，str() 会得到 Python repr
-            return _text_of(message.content)
+            # 用 _text_of 收口：content 若是 content block 列表，str() 会得到 Python repr。
+            # 判空也必须在**规整之后**做：内容是 `[]` 或 `[{"type":"text","text":""}]` 时
+            # `getattr(..., "content", "")` 是个 truthy 的容器，旧写法会误以为"这条有内容"，
+            # 于是取到一个空串答案并就此返回（既不回退到上一轮，也不继续往前找）。
+            text = _text_of(getattr(message, "content", ""))
+            if text:
+                return text
     return ""
 
 
@@ -190,9 +424,7 @@ def _usage_tokens(message) -> tuple[int, int]:
     return int(token_usage.get("prompt_tokens") or 0), int(token_usage.get("completion_tokens") or 0)
 
 
-def _build_graph(llm, tools: list, checkpointer):
-    tools_by_name = {tool.name: tool for tool in tools}
-
+def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
     async def agent_node(state: AgentState) -> dict:
         from app.observability import Recorder, Step, get_recorder, now_ms, estimate_cost
 
@@ -228,6 +460,53 @@ def _build_graph(llm, tools: list, checkpointer):
         rec: Recorder | None = get_recorder()
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None) or []
+
+        # 拿一份"当前有效的工具表 + 会话代次"。工具表会随会话重建整体换掉，
+        # 所以每次派单都现取，不能在编译期把工具对象存进闭包（那样会话一旦重建，
+        # 图里握着的就是已被关闭的旧会话，之后每次调用都失败）。
+        #
+        # `ensure()` 里含"拉起子进程 + 握手 + 子进程内冷加载索引"，实测约 0.7~3.0s。
+        # 第一次派单本来就要付这笔钱；但**会话重建**（子进程被 OOM/手工杀掉）也会走这里，
+        # 而 tools_node 是同步节点、卡住就等于卡住整个请求。所以同样套一层 step_timeout，
+        # 把"子进程起不来时整个请求挂死"变成"这一步明确报超时、模型据此收尾"。
+        try:
+            lease = await asyncio.wait_for(
+                tool_session.ensure(), timeout=AgentLimits.step_timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            note = f"工具会话建立超时（>{AgentLimits.step_timeout_seconds}s）"
+            if rec is not None:
+                rec.add(Step(node="tools", name="*", duration_ms=0, ok=False, note=note))
+                rec.error = note
+            return {
+                "messages": [
+                    ToolMessage(
+                        content=f"{note}。请基于已有信息作答，或请用户稍后重试。",
+                        tool_call_id=call.get("id", ""),
+                        name=call.get("name", ""),
+                    )
+                    for call in calls
+                ]
+            }
+        except ToolSessionUnavailable as exc:
+            # 子进程起不来（依赖缺失、索引损坏等）：如实告诉模型，让本轮以"工具不可用"收尾。
+            # 不抛异常——抛出去会让 HTTP 层回 502，而模型其实还能基于历史信息作答。
+            note = f"工具会话不可用：{exc}"[:300]
+            if rec is not None:
+                rec.add(Step(node="tools", name="*", duration_ms=0, ok=False, note=note))
+                rec.error = note
+            return {
+                "messages": [
+                    ToolMessage(
+                        content=f"工具暂时不可用（{exc}）。请基于已有信息作答，或请用户稍后重试。",
+                        tool_call_id=call.get("id", ""),
+                        name=call.get("name", ""),
+                    )
+                    for call in calls
+                ]
+            }
+        tools_by_name = lease.by_name
+
         # 判重窗口 = 最近 max_steps 次工具调用，实际只在"本次运行内"能命中：
         # history 存进 checkpoint 后 tuple 会被序列化成 list，跨轮次读回时
         # tuple key 与 list 条目不相等，因此不会误拦跨轮次的合法重复查询
@@ -239,36 +518,37 @@ def _build_graph(llm, tools: list, checkpointer):
         # 第二个会被第一个刚追加进 history 的 key 拦下；如果改成"先并发跑、事后再判重"，
         # 两个都会被执行——判重这道护栏就被这个改动悄悄拆掉了。所以先把整批的
         # 执行/跳过/报错决定一次性算出来，执行阶段只负责跑，不再改判。
-        planned: list[dict] = []
-        seen = list(history)
-        for call in calls:
-            name = call.get("name", "")
-            args = call.get("args") or {}
-            key = (name, json.dumps(args, ensure_ascii=False, sort_keys=True))
-            tool = tools_by_name.get(name)
-            if tool is None:
-                planned.append({"call": call, "name": name, "key": key, "tool": None,
-                                "content": f"未找到工具：{name}", "ok": False,
-                                "note": "工具不存在"})
-            elif is_duplicate_call(seen, key):
-                planned.append({
-                    "call": call, "name": name, "key": key, "tool": None,
-                    "content": (
-                        f"检测到重复工具调用（{name} {args}，本轮已执行过），"
-                        "为避免死循环本次不再执行。请基于已有信息作答，或换个问法。"
-                    ),
-                    "ok": True, "note": "重复调用，已跳过",
-                })
-            else:
-                seen.append(key)
-                planned.append({"call": call, "name": name, "key": key,
-                                "tool": tool, "content": None, "ok": True, "note": ""})
+        def plan() -> list[dict]:
+            planned: list[dict] = []
+            seen = list(history)
+            for call in calls:
+                name = call.get("name", "")
+                args = call.get("args") or {}
+                key = (name, json.dumps(args, ensure_ascii=False, sort_keys=True))
+                tool = tools_by_name.get(name)
+                if tool is None:
+                    planned.append({"call": call, "name": name, "key": key, "tool": None,
+                                    "content": f"未找到工具：{name}", "ok": False,
+                                    "note": "工具不存在"})
+                elif is_duplicate_call(seen, key):
+                    planned.append({
+                        "call": call, "name": name, "key": key, "tool": None,
+                        "content": (
+                            f"检测到重复工具调用（{name} {args}，本轮已执行过），"
+                            "为避免死循环本次不再执行。请基于已有信息作答，或换个问法。"
+                        ),
+                        "ok": True, "note": "重复调用，已跳过",
+                    })
+                else:
+                    seen.append(key)
+                    planned.append({"call": call, "name": name, "key": key,
+                                    "tool": tool, "content": None, "ok": True, "note": ""})
+            return planned
 
         # ---- 第二步：并发执行本批里"要跑"的调用 ----
         # 模型在一次 assistant 消息里给出多个 tool_call，本身就表示它认为这些调用互不依赖
-        # （例如"先查制度规则 + 再查个人数据"）。串行 for-await 会让每个调用各自新起一个
-        # MCP stdio 子进程、耗时直接相加：实测两个工具 8127ms；改成 gather 后 4663ms，
-        # 省掉 3464ms（43%）。这也是本项目最该优化的工程点（README「已知取舍」有口径说明）。
+        # （例如"先查制度规则 + 再查个人数据"）。串行 for-await 会让每个调用各付一次往返：
+        # 改成 gather 后两把工具并发（实测 8127ms → 4663ms；换成常驻会话后是 17ms 量级）。
         async def run_tool(item: dict) -> None:
             """执行单个工具调用，把结果写回 item。异常一律收敛成文本，不外抛。"""
             name = item["name"]
@@ -287,12 +567,49 @@ def _build_graph(llm, tools: list, checkpointer):
                 )
                 item["ok"] = False
                 item["note"] = item["content"][:160]
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # noqa: BLE001
+                # 会话/子进程死了：把这一代会话判死并让本调用**重试一次**。
+                # 只重试一次是刻意的——若重建后仍然失败，说明不是"会话过期"而是真故障，
+                # 再重试只会把延迟翻倍却不改变结果。
+                if _is_transport_failure(exc):
+                    await tool_session.invalidate(lease.generation)
+                    try:
+                        fresh = await tool_session.ensure()
+                    except ToolSessionUnavailable as rebuild_exc:
+                        item["content"] = (
+                            f"工具 {name} 调用失败：MCP 会话已断开且重建失败"
+                            f"（{rebuild_exc}）"
+                        )
+                        item["ok"] = False
+                        item["note"] = item["content"][:160]
+                        return
+                    retry_tool = fresh.by_name.get(name)
+                    if retry_tool is None:
+                        item["content"] = f"工具 {name} 调用失败：会话重建后该工具已不存在"
+                        item["ok"] = False
+                        item["note"] = item["content"][:160]
+                        return
+                    try:
+                        raw = await asyncio.wait_for(
+                            retry_tool.ainvoke(args),
+                            timeout=AgentLimits.step_timeout_seconds,
+                        )
+                        item["content"] = truncate_tool_output(
+                            _text_of(raw), AgentLimits.max_tool_output_chars
+                        )
+                        item["retried"] = "会话失效后重建，重试成功"
+                        item["duration_ms"] = now_ms() - t0
+                        return
+                    except Exception as retry_exc:  # noqa: BLE001
+                        exc = retry_exc
                 item["content"] = f"工具 {name} 调用失败：{type(exc).__name__}: {exc}"
                 item["ok"] = False
                 item["note"] = item["content"][:160]
             item["duration_ms"] = now_ms() - t0
 
+        planned = plan()
         to_run = [item for item in planned if item["tool"] is not None]
         if to_run:
             await asyncio.gather(*(run_tool(item) for item in to_run))
@@ -310,17 +627,22 @@ def _build_graph(llm, tools: list, checkpointer):
                 )
             )
             if rec is not None:
-                rec.add(
-                    Step(node="tools", name=item["name"],
-                         duration_ms=item.get("duration_ms", 0),
-                         ok=item["ok"], note=item["note"])
-                )
+                step = Step(node="tools", name=item["name"],
+                            duration_ms=item.get("duration_ms", 0),
+                            ok=item["ok"], note=item["note"])
+                # trace 里要能看出"这一步到底调了哪把工具、什么参数"：原先 steps 只记 node/name，
+                # 排查时只能靠顺序猜（name 与 node 在旧数据里都是 "tools"）。
+                step.tool_calls = [item["name"]]
+                step.tool_args = [item["call"].get("args") or {}]
+                if item.get("retried"):
+                    step.note = (step.note + "；" + item["retried"]).strip("；")
+                rec.add(step)
 
         return {
             "messages": new_messages,
             # 与串行实现口径一致：整批调用的 key 都进历史（含被跳过/未找到的），
             # 只保留最近 max_steps 条；用 seen 而不是重算，避免与判重时的顺序漂移。
-            "tool_call_history": seen[-AgentLimits.max_steps :],
+            "tool_call_history": (history + [i["key"] for i in planned])[-AgentLimits.max_steps :],
         }
 
     graph = StateGraph(AgentState)
@@ -337,13 +659,23 @@ def _build_graph(llm, tools: list, checkpointer):
 
 
 class AgentRuntime:
-    """持有编译好的图与 MCP 工具。会话标识 thread_id，崩溃后同 session 可续聊。"""
+    """持有编译好的图与常驻 MCP 工具会话。会话标识 thread_id，崩溃后同 session 可续聊。"""
 
-    def __init__(self, graph, tools: list, saver: AsyncSqliteSaver | None = None, conn=None):
+    def __init__(
+        self,
+        graph,
+        tools: list,
+        saver: AsyncSqliteSaver | None = None,
+        conn=None,
+        tool_session: McpToolSession | None = None,
+    ):
         self.graph = graph
+        # tools 只是"建图时的快照"，供 CLI/脚本/测试读工具名；真正派单走 tool_session，
+        # 这样会话重建换掉工具表时不用重新编译图。
         self.tools = tools
         self._saver = saver
         self._conn = conn
+        self._tool_session = tool_session
 
     def _config(self, session_id: str | None) -> dict:
         return {
@@ -399,19 +731,34 @@ class AgentRuntime:
 
     @staticmethod
     def _result(fresh: list) -> dict:
-        """统一收尾口径：answer / sources（答案真实引用）/ retrieved_sources（本轮检索命中）。
+        """统一收尾口径：answer / sources / retrieved_sources / tool_calls。
 
         两个来源字段是两个不同的问题，必须分开返回（见 _parse_citations 的实测说明）：
           - sources            = 答案正文里真实标注的【来源：X】——前端"引用来源"与用户直觉一致；
           - retrieved_sources  = 本轮工具返回过的来源（top_k 命中的文件）——观测/评测的检索口径。
         历史字段 `sources` 原本是后者，实测 9/9 条 trace 都比答案实际引用多 1 条，
         前端把它渲染成"来源："属于替答案多声明引用，因此本版本把语义改成前者。
+
+        `tool_calls`（本轮实际执行的工具调用次数）是给上面两个字段**消歧**用的：
+        多轮续聊时模型可能直接凭上下文作答、一次工具都不调（实测存在）。那时
+        `retrieved_sources` 为空，可答案正文里仍写着【来源：员工手册_示例.md】——那是历史轮次
+        留下的引用，本轮并没有检索。只有两个列表时，消费方无法区分
+        "检索了但没命中"（召回问题）和"根本没检索"（这条引用没有本轮证据）。
+
+        `unverified_sources`（查无此据的引用）与 `tool_calls` 是同一类"让引用可被质疑"的字段：
+        实测模型会写出知识库里不存在的来源名、甚至写出"（知识库检索失败…）"这种**描述了一件
+        没发生过的事**的假来源。见 `_split_verified_citations`。它只报事实、不改写答案。
         """
         answer = _final_answer(fresh)
+        citations = _parse_citations(answer)
+        retrieved = _parse_sources(fresh)
+        _, unverified = _split_verified_citations(citations, retrieved)
         return {
             "answer": answer,
-            "sources": _parse_citations(answer),
-            "retrieved_sources": _parse_sources(fresh),
+            "sources": citations,
+            "retrieved_sources": retrieved,
+            "unverified_sources": unverified,
+            "tool_calls": sum(1 for m in fresh if getattr(m, "type", "") == "tool"),
         }
 
     async def astream(self, messages: list[dict], session_id: str | None = None):
@@ -445,8 +792,13 @@ class AgentRuntime:
             pass
 
     async def aclose(self) -> None:
-        # adapters 每个工具调用自己开/关 stdio 会话，无需常驻清理；
-        # 这里关掉 SQLite checkpoint 连接
+        # 先关常驻 MCP 会话（含 stdio 子进程），再关 SQLite checkpoint 连接
+        if self._tool_session is not None:
+            try:
+                await self._tool_session.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+            self._tool_session = None
         if self._conn is not None:
             try:
                 await self._conn.close()
@@ -477,20 +829,18 @@ async def _open_checkpointer() -> tuple[AsyncSqliteSaver, aiosqlite.Connection]:
 
 
 async def create_runtime() -> AgentRuntime:
-    """工厂：声明 MCP 服务器与工具、建图，返回一个封装好生命周期(resource)的 AgentRuntime。
+    """工厂：建常驻 MCP 工具会话、建图，返回一个封装好生命周期(resource)的 AgentRuntime。
 
     OOP/设计要点：真正"需要对象封装"的是这里的**运行时生命周期**——checkpointer 的
-    AsyncSqliteSaver、sqlite 连接 conn、graph、tools 都需要在请求结束后正确关闭
-    (aclose/close)，不能靠模块级散落。所以返回 AgentRuntime(封装 graph+tools+saver+conn)
-    并约定由调用方负责用毕 aclose()：这是"用对象管理成对分配/释放资源(open/close)"的典型场景，
-    普通函数无法靠返回值表达"记得关连接"的约束。
-    （内部 get_tools / make_llm / 建图任一步抛错，都会先关掉已开 sqlite 连接再 raise，
-    避免泄漏 —— 见下方 try/except。）
+    AsyncSqliteSaver、sqlite 连接 conn、常驻 MCP 会话(McpToolSession)、graph 都需要在请求
+    结束后正确关闭 (aclose)，不能靠模块级散落。所以返回 AgentRuntime(封装 graph+tools+saver+
+    conn+tool_session) 并约定由调用方负责用毕 aclose()：这是"用对象管理成对分配/释放资源
+    (open/close)"的典型场景，普通函数无法靠返回值表达"记得关连接"的约束。
+    （内部 make_llm / 建会话 / 建图任一步抛错，都会先关掉已开资源再 raise，避免泄漏
+    —— 见下方 try/except。）
     """
-    from langchain_mcp_adapters.client import MultiServerMCPClient
-
     saver, conn = await _open_checkpointer()
-    client = MultiServerMCPClient(
+    tool_session = McpToolSession(
         {
             # 一个 MCP server("kbase"，由 app.mcp.servers 承载)里放两把工具：
             # retrieve_knowledge(查知识库) 与 query_business_db(查业务数据)。
@@ -507,15 +857,22 @@ async def create_runtime() -> AgentRuntime:
         # 先校验 key（纯本地、零成本）再拉起 MCP 子进程：否则缺 key 时每次重试
         # 都要白付一次子进程启动 + 索引加载，才在 make_llm 处报错。
         llm = make_llm(temperature=settings.temperature)
-        tools = await client.get_tools()
+        # 建会话并取工具表：启动即暴露"子进程起不来/索引坏了"，而不是等到第一次提问。
+        # 这一版工具表在服务生命周期内复用（不再每次调用新起子进程），
+        # 因此这次启动开销从"每次都付"变成"只付一次"。
+        lease = await tool_session.ensure()
+        tools = lease.tools
         llm = llm.bind_tools(tools)
-        graph = _build_graph(llm, tools, checkpointer=saver)
+        graph = _build_graph(llm, tool_session, checkpointer=saver)
     except BaseException:
-        # 任一步失败（含 CancelledError 这类 BaseException）都要先关掉已开的 sqlite
-        # 连接：services.ensure_services 允许每次请求重试，不关就每请求泄漏一个连接+线程。
+        # 任一步失败（含 CancelledError 这类 BaseException）都要先关掉已开资源：
+        # services.ensure_services 允许每次请求重试，不关就每请求泄漏一个连接+子进程。
+        await tool_session.aclose()
         await conn.close()
         raise
-    return AgentRuntime(graph=graph, tools=tools, saver=saver, conn=conn)
+    return AgentRuntime(
+        graph=graph, tools=tools, saver=saver, conn=conn, tool_session=tool_session
+    )
 
 
 async def run_single_question(question: str, session_id: str | None = None) -> dict:

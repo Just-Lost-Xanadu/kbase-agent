@@ -67,6 +67,21 @@ class ChatResponse(BaseModel):
         default_factory=list,
         description="本轮工具（检索）返回过的来源，即 top-k 命中；是检索口径，不等于答案引用",
     )
+    tool_calls: int = Field(
+        default=0,
+        description=(
+            "本轮实际执行的工具调用次数。多轮续聊时模型可能不调工具直接凭上下文作答，"
+            "此时该值为 0、retrieved_sources 为空——用来区分『检索了但没命中』与『本轮根本没检索』"
+        ),
+    )
+    unverified_sources: list[str] = Field(
+        default_factory=list,
+        description=(
+            "答案正文写了【来源：X】、但本轮检索并没有返回过 X 的那些引用（查无此据）。"
+            "实测模型会写出不存在的来源名、甚至写出『（知识库检索失败…）』这种描述未发生事件的假来源。"
+            "本字段只报事实、不改写答案；工具本轮无任何返回时不做判定（此时为空）"
+        ),
+    )
 
 
 def _question_of(req: ChatRequest) -> str:
@@ -201,6 +216,8 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
         answer=result["answer"],
         sources=result["sources"],
         retrieved_sources=result.get("retrieved_sources", []),
+        tool_calls=result.get("tool_calls", 0),
+        unverified_sources=result.get("unverified_sources", []),
     )
 
 
