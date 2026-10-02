@@ -18,7 +18,12 @@ class Embedder:
         if self.backend == "fastembed":
             from fastembed import TextEmbedding
 
-            self.model = TextEmbedding(model_name=settings.fastembed_model)
+            # 显式指定 cache_dir：不指定时 fastembed 会落到 %TEMP%\fastembed_cache，
+            # 而临时目录可能被清理掉，导致"索引在、模型没了"、必须重新联网下载。
+            self.model = TextEmbedding(
+                model_name=settings.fastembed_model,
+                cache_dir=settings.fastembed_cache_dir,
+            )
         elif self.backend == "flagembedding":
             from FlagEmbedding import BGEM3FlagModel
 

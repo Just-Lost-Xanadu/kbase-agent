@@ -46,6 +46,11 @@ class Settings:
     # embedding：默认 fastembed（ONNX，免 torch）；flagembedding 才用 bge-m3（需 .[embed]）
     embed_backend: str = os.getenv("EMBED_BACKEND", "fastembed")
     fastembed_model: str = os.getenv("FASTEMBED_MODEL", "BAAI/bge-small-zh-v1.5")
+    # 模型权重缓存目录。必须显式指定：fastembed 不指定时的默认值是**系统临时目录**
+    # （%TEMP%\fastembed_cache），而临时目录会被系统/清理工具删掉——实测遇到过一次，
+    # 后果是"索引还在、模型没了"，index_docs.py 必须重新联网下载，离线环境直接跑不起来。
+    # 放到项目 data/ 下（已 gitignore）之后缓存跟着仓库走，不会平白消失。
+    fastembed_cache_dir: str = os.getenv("FASTEMBED_CACHE_DIR", "./data/fastembed_cache")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "bge-m3")
 
     # rerank：opt-in（FlagReranker 依赖 torch，需 pip install -e ".[embed]"）

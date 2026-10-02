@@ -107,6 +107,22 @@ class RetrievalPipeline:
             raise RuntimeError(
                 f"切分结果为空（文档 {len(documents)} 篇）：检查 data/docs 下文档是否有内容"
             )
+        # 破坏性操作（reset）之前，先把 embedding 模型加载起来——首次运行会下载模型，需要网络。
+        #
+        # 为什么必须前置：模型加载原本发生在 add() 里，而 add() 在 reset() **之后**。
+        # 于是模型加载/下载失败时（离线、fastembed 缓存被清理、代理没开）向量库已经被清空，
+        # 而 sidecar 还是旧的 → is_indexed()（sidecar 可读 + count>0）为 False，
+        # ensure_ready() 立刻抛"索引不一致：分块清单存在但向量库为空"，
+        # **服务对每个请求都失败且不会自愈**（自动重建只在"读不到 sidecar"时才触发，
+        # 而 sidecar 完好）。已实测复现：清掉模型缓存后 index_docs.py 一跑，
+        # 旧索引被清空、sidecar 留着 40 行，随后 eval.py 与 /api/chat 全部失败。
+        #
+        # 前置之后失败发生在任何破坏之前：旧索引原封不动，恢复网络重跑即可。
+        # 用 getattr 探测而不是直接调 self.embedder.embed：单测会用哨兵对象顶替 embedder
+        # 来单独验证"reset 先于 add"的顺序，那条路径不该被模型加载绊住。
+        _warm_up = getattr(self.embedder, "embed", None)
+        if callable(_warm_up):
+            _warm_up([chunks[0]["content"]])
         sidecar = self._sidecar_path()
         sidecar.parent.mkdir(parents=True, exist_ok=True)
         # 先落临时文件再原子替换：直接把 json 一行行写进 chunks.jsonl 的话，
