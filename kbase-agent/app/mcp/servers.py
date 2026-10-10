@@ -4,6 +4,17 @@
 单个工具通过 FastMCP 声明，天然支持跨语言/跨进程复用；进程内也可直接 import 调用。
 """
 
+# 模块级注解一律惰性求值（PEP 563）。
+# 为什么必须加：本模块有 `_pipeline: RetrievalPipeline | None = None`、
+# `_records_cache: tuple[...] | None = None` 这类**模块级注解**，它们在导入期求值。
+# 而测试会把 app.retrieval.pipeline.RetrievalPipeline monkeypatch 成 lambda，于是只要
+# "首次导入 app.mcp.servers"发生在 patch 之后，就会抛：
+#   TypeError: unsupported operand type(s) for |: 'function' and 'NoneType'
+# 正常收集顺序下被别的用例掩盖（它们先导入了本模块），换个顺序/单跑一个文件就会红。
+# 加上这个 future import 之后注解只是字符串，任何 patch 顺序都安全。
+# 回归测试：tests/test_units.py::test_servers_module_imports_when_pipeline_class_is_patched
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
@@ -116,7 +127,7 @@ def retrieve_knowledge(question: str) -> str:
         return "错误：检索管道未初始化。"
     try:
         hits = _pipeline.retrieve(question, top_k=3)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # 工具契约：检索出错也返回可读错误文本，不向 MCP 传输层抛异常
         return f"错误：{exc}"
     if not hits:
         return "知识库中未找到与问题相关的内容，请如实告知用户资料中暂无此信息。"
@@ -143,7 +154,14 @@ def query_business_db(question: str) -> str:
     # 另注（演示边界）：本工具**没有鉴权**——它是把"问题文本"当身份来源，而非绑定会话用户，
     # 因此无法阻止用户询问他人数据。生产化应改为由会话层注入 user_id 并做行级过滤，
     # 该限制已在 README「已知取舍」如实写明，不对外宣称具备权限控制。
-    matched_names = [r["name"] for r in records if r.get("name") and r["name"] in question]
+    # 按姓名去重（保序）：库里同一姓名出现两条记录属于**数据问题**，
+    # 不该被判成"问题里有多个姓名"而拒绝回答（原先 len>1 直接拒绝，两张同名表 →
+    # 用户永远问不到数据）。重复行本身交给数据侧去修。
+    # 注意：匹配仍是**子串**匹配（`r["name"] in question`），所以"张伟明"会命中"张伟"——
+    # 这个误伤风险已在 README「已知取舍」如实写明，生产化方向是实体抽取 + 唯一 ID。
+    matched_names = list(
+        dict.fromkeys(r["name"] for r in records if r.get("name") and r["name"] in question)
+    )
     if not matched_names:
         return (
             "无法确定员工身份：请在问题中明确员工姓名（例如“张三还剩几天年假”）。"
@@ -157,16 +175,21 @@ def query_business_db(question: str) -> str:
     # 与上面那行同一口径：这里也必须用 .get("name")——records.jsonl 是面向用户可编辑的数据文件，
     # 只要混进一条没有 name 键、且排在命中记录之前的行，直接下标就会 KeyError（工具直接报错）。
     matched = next(r for r in records if r.get("name") == matched_names[0])
-    return json.dumps(
-        {
-            "employee": matched["name"],
-            "annual_leave_total": matched["annual_leave_total"],
-            "annual_leave_remaining": matched["annual_leave_remaining"],
-            "overtime_balance_hours": matched["overtime_balance_hours"],
-            "latest_expense": matched["latest_expense"],
-        },
-        ensure_ascii=False,
-    )
+    # 四个字段统一用 .get()。records.jsonl 是**面向用户可编辑的**数据文件，缺字段是常态
+    # （手工加一行只写了姓名、从别处粘过来少了 latest_expense…）。原先只有 name 用了 .get()，
+    # 缺其余键时工具直接 KeyError：用户看到的是"工具失败"，既不知道缺哪个字段，也无从修数据。
+    # 现在取默认值 None，并把缺失字段显式说出来，由模型如实转告用户。
+    fields = ("annual_leave_total", "annual_leave_remaining",
+              "overtime_balance_hours", "latest_expense")
+    payload: dict = {"employee": matched["name"]}
+    payload.update({field: matched.get(field) for field in fields})
+    missing = [field for field in fields if field not in matched]
+    if missing:
+        payload["note"] = (
+            "该员工记录缺少字段：" + "、".join(missing)
+            + "。请如实告知用户这几项数据缺失，不要猜测或推算。"
+        )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 if __name__ == "__main__":
@@ -174,6 +197,6 @@ if __name__ == "__main__":
         pipeline = RetrievalPipeline()
         pipeline.ensure_ready()
         set_pipeline(pipeline)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001  # 启动期索引/依赖不可用也要照常起服务，只把原因写到 stderr
         print(f"[mcp] 检索索引暂不可用，retrieve_knowledge 将返回错误：{exc}", file=sys.stderr)
     mcp.run()  # 默认 stdio 传输：被 `python -m app.mcp.servers` 拉起

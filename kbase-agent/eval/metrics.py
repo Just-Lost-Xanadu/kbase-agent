@@ -9,6 +9,10 @@ def gold_sources(case: dict) -> list[str]:
       - `expected_sources` ：多跳，需要**多篇文档共同**才能回答，判定要求全部命中。
     两者都空表示"应拒答"用例（语料里本来就没有答案）——检索层对这类不判命中，
     由端到端层判"有没有编造"（见 scripts/eval_e2e.py）。
+
+    另注：用例里可能带的 `gold_answer` 是**预留字段**——本模块与 scripts/eval*.py 都不读它；
+    答案侧判定只走 `expected_keywords`（字符串覆盖，coverage 不是 accuracy）与
+    `must_not_contain`（应拒答用例的编造特征）。别以为它在参与评分（README 也写了这条）。
     """
     many = case.get("expected_sources")
     if many:

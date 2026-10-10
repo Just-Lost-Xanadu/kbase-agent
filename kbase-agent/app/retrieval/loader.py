@@ -27,7 +27,7 @@ def _extract_docx(path: Path) -> str | None:
         from docx import Document
 
         doc = Document(str(path))
-    except Exception:
+    except Exception:  # noqa: BLE001  # 单个文件损坏不得中断整库建索引：返回 None，由 load_documents 打 WARNING
         return None
     parts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     for idx, table in enumerate(doc.tables, start=1):
@@ -53,7 +53,7 @@ def _extract_xlsx(path: Path) -> str | None:
         import openpyxl
 
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    except Exception:
+    except Exception:  # noqa: BLE001  # 同上：坏文件只跳过自己，其余文档照常入库
         return None
     try:
         parts = []
@@ -76,13 +76,13 @@ def _extract_pdf(path: Path) -> str | None:
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
-    except Exception:
+    except Exception:  # noqa: BLE001  # 单页抽取失败只丢该页；整份文件坏则返回 None 由 loader 打 WARNING
         return None
     pages = []
     for idx, page in enumerate(reader.pages, start=1):
         try:
             text = (page.extract_text() or "").strip()
-        except Exception:
+        except Exception:  # noqa: BLE001  # 单页抽取失败只丢该页；整份文件坏则返回 None 由 loader 打 WARNING
             text = ""
         if text:
             pages.append(f"[第 {idx} 页]\n" + text)

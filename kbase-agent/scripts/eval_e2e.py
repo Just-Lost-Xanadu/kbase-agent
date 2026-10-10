@@ -26,9 +26,10 @@
     python scripts/eval_e2e.py --tag baseline              # 全量 40 条，记为 baseline
     python scripts/eval_e2e.py --tag v2-prompt             # 改动后再跑一次
     python scripts/eval_e2e.py --tag v2-prompt --compare baseline   # 打印与基线的回归 diff
-    python scripts/eval_e2e.py --limit 5                   # 冒烟（不落报告）
-    python scripts/eval_e2e.py --reanalyze                 # 只重算已有报告的指标（不调 API、不要 key）
-                                                           # 改了 questions.jsonl 的金标关键词后跑它即可刷新覆盖率
+    python scripts/eval_e2e.py --limit 5                   # 冒烟（不落报告；不要与 --tag 同用）
+    python scripts/eval_e2e.py --reanalyze --tag corpus-v2 # 只重算这一份报告（不调 API、不要 key）
+    python scripts/eval_e2e.py --reanalyze --all           # 批量重算（会改写全部报告，先备份）
+                                                           # 改了 questions.jsonl 的关键词后跑它即可刷新覆盖率
 报告产物：docs/eval-reports/{tag}.json（含 per-case 与 answer 原文，可被 --compare 引用）
 """
 
@@ -48,7 +49,7 @@ try:
 except AttributeError:  # Python < 3.7
     pass
 
-from eval.metrics import gold_sources, hit_rate, is_refusal_case, keyword_coverage  # noqa: E402
+from eval.metrics import gold_sources, hit_rate, is_refusal_case, keyword_coverage
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_FILE = ROOT / "eval" / "questions.jsonl"
@@ -190,7 +191,6 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         print(f"  {key:<18} {fa.format(base_v)} -> {fb.format(new_v)}  {fd.format(diff)}")
 
     base_by_id = {r["id"]: r for r in a["per_case"]}
-    new_by_id = {r["id"]: r for r in b["per_case"]}
     regressed = [
         r for r in b["per_case"]
         if r["id"] in base_by_id
@@ -252,7 +252,15 @@ def _compare(tag_a: str, tag_b: str, a: dict, b: dict) -> None:
         print(f"    用例 {cite_regressed}")
 
 
-async def main(limit: int, tag: str | None, compare: str | None) -> None:
+async def run_eval(limit: int, tag: str | None, compare: str | None) -> None:
+    """端到端评测的异步入口。
+
+    注意：这里**不能**叫 `main`。下面那个同步的 `main()` 是 CLI 入口，两者同名时
+    后者会覆盖前者，于是 `asyncio.run(main(limit=...))` 调到自己并抛
+    `TypeError: main() got an unexpected keyword argument 'limit'`——
+    整条 `--limit/--tag/--compare` 路径（也就是 README 里写的用法）会直接崩。
+    回归测试：`tests/test_eval_cli.py::test_e2e_cli_limit_path_reaches_async_entry`。
+    """
     from app.agent.graph import create_runtime
 
     cases = _load_cases()
@@ -416,8 +424,13 @@ async def _run_case(runtime, case: dict, thread_id: str | None = None) -> dict:
     }
 
 
-def reanalyze() -> None:
-    """离线重算已有报告里的指标（不调 API、不需要 key）。
+def reanalyze(tag: str | None = None, all_reports: bool = False) -> None:
+    """离线重算报告里的指标（不调 API、不需要 key）。
+
+    **只重算显式指定的报告**（`--tag X` 或 `--all`）：这个函数会**就地改写**报告文件，
+    而 docs/eval-reports/ 里放的是历史基线。原先它 `glob("*.json")` 无差别重写全部 6 份，
+    于是"改一次金标口径、顺手跑一次 --reanalyze"就会把历史证据悄悄改掉——这与 README
+    "报告可被 --compare 引用"的用法直接冲突。所以默认改成"必须点名"，批量要显式 --all。
 
     用途一：给历史报告补齐"当初跑的时候还没有的指标"（例如 p50/p95 延迟）——
     per-case 里已经存着 duration_ms/token/cost 明细，指标口径变了不必重花钱重跑。
@@ -433,7 +446,24 @@ def reanalyze() -> None:
     if not reports:
         print(f"[x] {REPORT_DIR} 下没有报告可分析。")
         return
-    for path in reports:
+    available = ", ".join(p.stem for p in reports)
+    if all_reports:
+        chosen = reports
+        print(f"[!] --all 将**就地改写** {len(chosen)} 份报告：{', '.join(p.name for p in chosen)}")
+        print("    要保留历史基线请先备份 docs/eval-reports/（或先 commit/stash）。")
+    elif tag:
+        chosen = [REPORT_DIR / f"{tag}.json"]
+        if not chosen[0].exists():
+            print(f"[x] 找不到报告 {chosen[0]}")
+            print(f"    可用 tag：{available}")
+            raise SystemExit(2)
+    else:
+        print("[x] --reanalyze 必须指名要重算哪一份，避免误改历史基线：")
+        print("      python scripts/eval_e2e.py --reanalyze --tag <name>   # 只重算这一份")
+        print("      python scripts/eval_e2e.py --reanalyze --all          # 批量（会改写全部）")
+        print(f"    可用 tag：{available}")
+        raise SystemExit(2)
+    for path in chosen:
         report = json.loads(path.read_text(encoding="utf-8"))
         results = report.get("per_case") or []
         if not results:
@@ -484,18 +514,48 @@ def reanalyze() -> None:
         print(f"[ok] {path.name}  metrics 已重算{note}，变化字段：{changed or '（无）'}")
 
 
-if __name__ == "__main__":
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条（0=全量）")
-    parser.add_argument("--tag", type=str, default=None, help="本次运行命名（写入 docs/eval-reports/{tag}.json）")
-    parser.add_argument("--compare", type=str, default=None, help="与 docs/eval-reports/{tag}.json 的基线做回归 diff")
-    parser.add_argument(
-        "--reanalyze",
-        action="store_true",
-        help="只离线重算已有报告的指标（不调 API、不需要 key）",
-    )
-    args = parser.parse_args()
+    parser.add_argument("--limit", type=int, default=0,
+                        help="只跑前 N 条（0=全量）；冒烟模式，与 --tag 同用时不会落报告")
+    parser.add_argument("--tag", type=str, default=None,
+                        help="本次运行命名（写入 docs/eval-reports/{tag}.json）")
+    parser.add_argument("--compare", type=str, default=None,
+                        help="与 docs/eval-reports/{tag}.json 的基线做回归 diff（需同时给 --tag）")
+    parser.add_argument("--reanalyze", action="store_true",
+                        help="离线重算已有报告的指标（不调 API、不需要 key）；用 --tag 指定单份")
+    parser.add_argument("--all", action="store_true",
+                        help="仅与 --reanalyze 同用：批量重算 docs/eval-reports/ 下全部报告（会就地改写）")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI 入口。
+
+    原先有三种"静默什么都不做"的情形，现在都显式报错，免得人以为做了、其实没做：
+      1) --tag 与 --limit 同时给 → 不会落报告（落盘条件是 `tag and not limit`）；
+      2) --compare 缺 --tag → 静默无操作；
+      3) --reanalyze 无差别重写全部报告（见 reanalyze 的说明）。
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.tag and args.limit:
+        parser.error("--tag 与 --limit 同时给出不会落报告（--limit 是冒烟模式）；请去掉其中一个")
+    if args.compare and not args.tag:
+        parser.error("--compare 需要同时给 --tag（本次运行的 tag），否则没有可比的新报告")
+    if args.all and not args.reanalyze:
+        parser.error("--all 只与 --reanalyze 同用（批量离线重算），不能单独使用")
+    if args.reanalyze and (args.limit or args.compare):
+        parser.error("--reanalyze 是纯离线重算，不与 --limit / --compare 同用；"
+                     "指定单份报告用 --reanalyze --tag <name>")
+
     if args.reanalyze:
-        reanalyze()
-    else:
-        asyncio.run(main(limit=args.limit, tag=args.tag, compare=args.compare))
+        reanalyze(tag=args.tag, all_reports=args.all)
+        return 0
+    asyncio.run(run_eval(limit=args.limit, tag=args.tag, compare=args.compare))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -105,7 +105,7 @@ if (-not $chromaOk) {
     & $python "$Root\scripts\index_docs.py"
     if ($LASTEXITCODE -ne 0) {
         Warn "建索引失败：多为无法下载 embedding 模型。"
-        Warn "有模型缓存的机器可先设置：FASTEMBED_CACHE_PATH=<缓存目录> 后重跑。"
+        Warn "有模型缓存的机器可先设置：$env:FASTEMBED_CACHE_DIR=<缓存目录> 后重跑。"
     }
 } else {
     Write-Host "索引已存在，跳过建库"

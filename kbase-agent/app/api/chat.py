@@ -169,11 +169,11 @@ async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
     if result is not None and (answer or "").strip():
         try:
             await _record_turn(req, answer, sources)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             pass
     try:
         await _save_trace(req, rec.summarize(), answer, sources, retrieved)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         pass
 
 
@@ -183,7 +183,7 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
 
     try:
         _, runtime = await ensure_services(request.app)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     rec = Recorder(question=_question_of(req))
@@ -202,7 +202,7 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
         # shield 保证这次写入不被取消打断。
         await asyncio.shield(_persist(req, rec, None))
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         rec.error = str(exc)[:300]
         await asyncio.shield(_persist(req, rec, None))
         raise HTTPException(status_code=502, detail=f"Agent 执行失败：{exc}") from exc
@@ -226,7 +226,7 @@ async def chat_stream(req: ChatRequest, request: Request):
     """SSE 流式：逐步下发各节点增量，收尾事件带最终答案与引用。"""
     try:
         _, runtime = await ensure_services(request.app)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     thread_id, ephemeral = _thread_of(req)

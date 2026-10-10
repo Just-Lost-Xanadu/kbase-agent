@@ -95,7 +95,7 @@ def _is_transport_failure(exc: BaseException) -> bool:
 class _Lease:
     """一次会话占用的凭据。`generation` 用来判断"我拿到的会话是否已经被判死"。"""
 
-    __slots__ = ("tools", "by_name", "generation", "session")
+    __slots__ = ("by_name", "generation", "session", "tools")
 
     def __init__(self, tools: list, generation: int, session):
         self.tools = tools
@@ -175,7 +175,7 @@ class McpToolSession:
             # 别处抛出来的原始异常会漏到 HTTP 层变成 502（而期望行为是"降级作答"）。
             try:
                 tools, session = await self._session_factory()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise ToolSessionUnavailable(
                     f"MCP 工具会话建立失败：{type(exc).__name__}: {exc}"
                 ) from exc
@@ -201,7 +201,7 @@ class McpToolSession:
                 with contextlib.suppress(Exception):
                     await stack.aclose()
                 raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ToolSessionUnavailable(
                 f"MCP 工具会话建立失败：{type(exc).__name__}: {exc}"
             ) from exc
@@ -319,7 +319,53 @@ def _parse_sources(messages: list) -> list[str]:
 
 _CITATION_RE = re.compile(r"【来源：([^】]+)】")
 # 同一个【来源：…】括号内的多个文件名分隔符（模型会写"A、B、C"，也可能用逗号/分号/斜杠）
+# 与 app/retrieval/loader.SUPPORTED_EXTS 一致（有单测断言两者相等，防漂移）
+_SOURCE_EXTS: tuple[str, ...] = (".md", ".txt", ".docx", ".xlsx", ".pdf")
 _CITATION_SPLIT = re.compile(r"[、,，;；/]+")
+
+
+def _looks_like_source_name(text: str) -> bool:
+    """这段文字看起来像"语料里的文件名"吗（以已知扩展名结尾）。
+
+    判据只用扩展名，不必读语料目录：本项目的 source 一律是 `data/docs` 下的真实文件名
+    （见 app/retrieval/loader.py 的 SUPPORTED_EXTS），都以这五种扩展名结尾。
+    """
+    return text.strip().lower().endswith(_SOURCE_EXTS)
+
+
+def _split_citation_names(raw: str) -> list[str]:
+    """把【来源：…】括号里的内容拆成若干个来源名（**保真优先**）。
+
+    两种真实写法都要支持：
+      - 模型把多篇写在一个括号里：`【来源：A.md、B.md、C.md】` → 拆成三条；
+      - 模型在括号里写一句**描述**：实测那条假来源
+        `【来源：业务系统个人数据查询结果（知识库检索失败,无制度文件可引用）】`
+        —— 按逗号硬拆会把一句人话切成语义不完整的两段（旧实现就把这条存成了
+        `["业务系统个人数据查询结果（知识库检索失败", "无制度文件可引用）"]`）。
+
+    规则：**只在"相邻两段里至少有一段像文件名"处分组**。于是连续的非文件名片段
+    （也就是那句描述）会自然粘回一起，而 `A.md、B.md` 照旧拆开；合法文件名与描述混在
+    一个括号里时也不会被粘住。README 承诺的"答案写了什么要如实保留"在两种写法下都成立。
+    """
+    separators = list(_CITATION_SPLIT.finditer(raw))
+    segments: list[str] = []
+    pos = 0
+    for match in separators:
+        segments.append(raw[pos:match.start()])
+        pos = match.end()
+    segments.append(raw[pos:])
+    if len(segments) == 1:
+        return [segments[0].strip()] if segments[0].strip() else []
+
+    looks_like_file = [_looks_like_source_name(segment) for segment in segments]
+    groups: list[str] = []
+    start = 0
+    for index in range(1, len(segments)):
+        if looks_like_file[index - 1] or looks_like_file[index]:
+            groups.append(raw[start:separators[index - 1].start()])
+            start = separators[index - 1].end()
+    groups.append(raw[start:])
+    return [group.strip() for group in groups if group.strip()]
 
 
 def _parse_citations(answer: str) -> list[str]:
@@ -346,7 +392,7 @@ def _parse_citations(answer: str) -> list[str]:
         # 没规定一篇一个括号，模型两种写法都会出现。不拆则会返回单元素复合串
         # （实测库里就有 `'薪酬与绩效制度_示例.md、绩效系数对照表.xlsx、员工手册_示例.md'`），
         # 前端渲染成一个标签、按 len(sources) 统计的消费方也会数错。
-        for source in _CITATION_SPLIT.split(match.group(1)):
+        for source in _split_citation_names(match.group(1)):
             source = source.strip()
             if source and source not in citations:
                 citations.append(source)
@@ -426,7 +472,13 @@ def _usage_tokens(message) -> tuple[int, int]:
 
 def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
     async def agent_node(state: AgentState) -> dict:
-        from app.observability import Recorder, Step, get_recorder, now_ms, estimate_cost
+        from app.observability import (
+            Recorder,
+            Step,
+            estimate_cost,
+            get_recorder,
+            now_ms,
+        )
 
         rec: Recorder | None = get_recorder()
         t0 = now_ms()
@@ -473,7 +525,7 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
             lease = await asyncio.wait_for(
                 tool_session.ensure(), timeout=AgentLimits.step_timeout_seconds
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             note = f"工具会话建立超时（>{AgentLimits.step_timeout_seconds}s）"
             if rec is not None:
                 rec.add(Step(node="tools", name="*", duration_ms=0, ok=False, note=note))
@@ -561,7 +613,7 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                 item["content"] = truncate_tool_output(
                     _text_of(raw), AgentLimits.max_tool_output_chars
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 item["content"] = (
                     f"工具 {name} 调用超时（>{AgentLimits.step_timeout_seconds}s）"
                 )
@@ -787,7 +839,7 @@ class AgentRuntime:
             return
         try:
             await self._saver.adelete_thread(session_id)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             # 清理失败不该让评测本身失败（指标已经拿到了）
             pass
 
@@ -796,13 +848,13 @@ class AgentRuntime:
         if self._tool_session is not None:
             try:
                 await self._tool_session.aclose()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
             self._tool_session = None
         if self._conn is not None:
             try:
                 await self._conn.close()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
             self._conn = None
 

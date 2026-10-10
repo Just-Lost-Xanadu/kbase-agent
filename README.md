@@ -48,7 +48,9 @@ uvicorn app.main:app --reload              # http://127.0.0.1:8000
 Windows 上也可直接双击 `kbase-agent/start.bat`（一键建 venv → 装依赖 → 建索引 → 起服务）。
 
 不需要 API key 的离线路径：`python scripts/index_docs.py` → `python scripts/eval.py` →
-`python scripts/eval_e2e.py --reanalyze`。
+`python scripts/eval_e2e.py --reanalyze --tag corpus-v2`。
+「检索路消融」的表格现在可以一条命令复现：`python scripts/eval.py --route vector|bm25`、
+`python scripts/eval.py --sweep-k`。
 
 ## 与姊妹项目 mcp-tools 的关系
 

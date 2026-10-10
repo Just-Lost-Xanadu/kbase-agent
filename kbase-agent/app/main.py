@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
     if runtime is not None:
         try:
             await runtime.aclose()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             pass
 
 

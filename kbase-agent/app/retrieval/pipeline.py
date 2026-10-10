@@ -67,7 +67,7 @@ class RetrievalPipeline:
     def is_indexed(self) -> bool:
         try:
             return self._load_chunks() is not None and self.vector_store.count() > 0
-        except Exception:
+        except Exception:  # noqa: BLE001  # 任何读取失败都等价于“没有索引”，交给上层自动重建（见 _load_chunks 说明）
             return False
 
     def ensure_ready(self, auto_index: bool = False) -> None:
@@ -155,8 +155,22 @@ class RetrievalPipeline:
         )
 
     # ---- 检索 -----------------------------------------------------------
-    def retrieve(self, query: str, top_k: int = 3) -> list[dict]:
+    def retrieve(self, query: str, top_k: int = 3, route: str = "hybrid") -> list[dict]:
+        """检索入口。
+
+        route 是给**消融实验**用的（scripts/eval.py --route），默认行为与旧版完全一致：
+          - "hybrid"（默认）：向量 + BM25 各粗召回 `max(top_k * 3, 10)` 条 → RRF 融合 → 取 top_k，
+            开了 RERANK_ENABLED 时再重排；
+          - "vector" / "bm25"：只走单路（不粗召回、不融合）——这正是 README「检索路消融」表里
+            "仅向量 0.875 / 仅 BM25 0.964"的口径。
+        """
         self.ensure_ready()
+        if route == "vector":
+            return self.vector_store.search(query, top_k=top_k)
+        if route == "bm25":
+            return self._bm25.search(query, top_k=top_k)
+        if route != "hybrid":
+            raise ValueError(f"未知 route={route!r}，可选 hybrid / vector / bm25")
         k = max(top_k * 3, 10)
         vector_hits = self.vector_store.search(query, top_k=k)
         keyword_hits = self._bm25.search(query, top_k=k)

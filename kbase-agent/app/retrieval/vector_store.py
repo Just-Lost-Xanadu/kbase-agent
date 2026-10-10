@@ -79,7 +79,7 @@ class VectorStore:
         try:
             self._ensure_collection()
             return self._collection.count()
-        except Exception:
+        except Exception:  # noqa: BLE001  # 读不出来与确实是空在这里等价：is_indexed() 同样会走自动重建
             return 0
 
     def add(self, chunks: list[dict]) -> None:
