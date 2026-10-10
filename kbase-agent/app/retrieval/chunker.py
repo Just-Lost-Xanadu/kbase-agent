@@ -1,7 +1,14 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+# 切分参数的唯一事实来源：默认值只在这里写一次，chunker / pipeline / CLI / eval 都引用它，
+# 避免"文档说 800、代码里是 1000"这类漂移。
+DEFAULT_CHUNK_SIZE = 800
+DEFAULT_OVERLAP = 150
 
-def fixed_size_chunk(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
+
+def fixed_size_chunk(
+    text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_OVERLAP
+) -> list[str]:
     """固定长度：按字符窗口滑切（无启发式，只按长度截断），预留 overlap 防断句丢信息。
 
     与 recursive 比：实现最简单、可复现；代价是可能把完整句子/概念拦腰切断，语义衔接不如
@@ -22,7 +29,9 @@ def fixed_size_chunk(text: str, chunk_size: int = 800, overlap: int = 150) -> li
     return chunks
 
 
-def recursive_chunk(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
+def recursive_chunk(
+    text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_OVERLAP
+) -> list[str]:
     """递归切分：按分隔符优先级（段落/句号/逗号…）切到不超过 chunk_size，语义更完整。
 
     用 langchain RecursiveCharacterTextSplitter：先按最有语义边界的大分隔符（如换行段落、
@@ -37,11 +46,16 @@ def recursive_chunk(text: str, chunk_size: int = 800, overlap: int = 150) -> lis
 
 
 def split_documents(
-    documents: list[dict], methods: tuple[str, ...] = ("recursive",)
+    documents: list[dict],
+    methods: tuple[str, ...] = ("recursive",),
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    overlap: int = DEFAULT_OVERLAP,
 ) -> list[dict]:
     """对每个文档跑指定切分法，产出带 chunk_id / source / method 的分块。
 
     入参 documents：每个 {'content': 原文, 'source': 文档名}；由 loader 产出。
+    chunk_size / overlap 是**建索引时**的参数——换值必须整库重建（本函数只负责切分，
+    重建由 RetrievalPipeline.index 负责，它走的是"先清空 collection 再全量写入"）。
     返回 list[dict]，每块：
       - content : 该段文本
       - source  : 来自哪个文档（用于引用溯源【来源：...】）
@@ -66,7 +80,7 @@ def split_documents(
     for doc in documents:
         text, source = doc["content"], doc["source"]
         for method in methods:
-            pieces = chunkers[method](text)
+            pieces = chunkers[method](text, chunk_size=chunk_size, overlap=overlap)
             for idx, piece in enumerate(pieces):
                 chunks.append(
                     {

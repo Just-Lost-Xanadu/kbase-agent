@@ -25,6 +25,10 @@
   （回答率 / 检索口径引用覆盖 / **答案引用口径** / 答案关键词覆盖率 / **应拒答通过率** / 成本与 p50·p95），
   金标含**单源 / 多跳 / 冲突 / 应拒答**四类，支持 `--tag` 落报告、`--compare` 基线 diff、
   `--reanalyze` 离线重算指标。实测报告在 [`kbase-agent/docs/eval-reports/`](./kbase-agent/docs/eval-reports/)。
+- **参数消融可一条命令复现**：检索路（`--route`）、`top_k`（`--sweep-k`）、切分粒度
+  （`--sweep-chunk-size`，会重建索引并在跑完后自动恢复默认值）都有开关。切分粒度那张表给出了一个
+  具体结论：**块越大，向量路单调变差（0.9643→0.8214），而 BM25 几乎不动**——两条路的失效模式不同，
+  这正是值得做混合检索的又一条证据；RRF 在 400~800 有平台，到 1600 才跟着掉。
 - **可归因的性能改造（两步，各自形状不同）**：第一步把同一批的多个工具调用从串行改成
   `asyncio.gather` 并发，实测两个工具 8127ms → 4663ms，端到端 `p95` 11049ms → **7256ms（−34%）**
   而 `p50` 不变——收益只落在"一次调多个工具"的尾部用例上，这个形状本身就是改动打对了地方的证据。
@@ -33,7 +37,9 @@
   LLM 往返而不是工具调用。两步都**没有**放弃"真 MCP"这个属性。
 - **不宣称测不出来的东西**：README 记录了一次**真实的扩容实验**——9 篇语料时三条检索路都是 1.0
   （评测没有区分度，"用了混合检索"没有数据支撑）；扩到 39 篇并把金标加到 60 条后差异才出现。
-  另外 `p50/p95`、关键词覆盖率、应拒答通过率都明确标注了自己的口径边界与已知盲区。
+  也写明了**规模边界**：全库 1.5 万字，`fixed` vs `recursive` 的差别只作用在 3/39 篇文档上，
+  统计效力不足以支撑"做了分块调优"，所以不宣称。另外 `p50/p95`、关键词覆盖率、应拒答通过率
+  都明确标注了自己的口径边界与已知盲区。
 
 ## 快速开始
 
@@ -52,7 +58,7 @@ Windows 上也可直接双击 `kbase-agent/start.bat`（一键建 venv → 装�
 不需要 API key 的离线路径：`python scripts/index_docs.py` → `python scripts/eval.py` →
 `python scripts/eval_e2e.py --reanalyze --tag corpus-v2`。
 「检索路消融」的表格现在可以一条命令复现：`python scripts/eval.py --route vector|bm25`、
-`python scripts/eval.py --sweep-k`。
+`python scripts/eval.py --sweep-k`、`python scripts/eval.py --sweep-chunk-size`。
 
 ## 与姊妹项目 mcp-tools 的关系
 

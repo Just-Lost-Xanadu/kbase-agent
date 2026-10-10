@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from app.config import settings
-from app.retrieval.chunker import split_documents
+from app.retrieval.chunker import DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP, split_documents
 from app.retrieval.embedder import Embedder
 from app.retrieval.hybrid import Reranker, hybrid_search
 from app.retrieval.keyword import BM25Index
@@ -90,17 +90,31 @@ class RetrievalPipeline:
             "索引不存在：请先运行 python scripts/index_docs.py（或让服务自动建索引）"
         )
 
-    def index(self, source_dir: str | Path | None = None, method: str = "recursive") -> None:
-        """全量重建索引。
+    def index(
+        self,
+        source_dir: str | Path | None = None,
+        method: str = "recursive",
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        overlap: int = DEFAULT_OVERLAP,
+    ) -> int:
+        """全量重建索引，返回分块数。
 
         注意这里是**全量**语义：每次都把 source_dir 下所有文档重新解析、切分、入库，
         因此必须先清空 collection——否则换切分法（chunk_id 前缀变了）或同名文档变短
         （idx 数量变少）时，旧向量覆盖不到、会永久残留，导致"向量路召回旧切片、
         BM25 只有新切片"的两路口径不一致（详见 VectorStore.reset 的说明）。
+
+        `chunk_size` / `overlap` 是**建索引时**的参数：chunk_id 里带 method 但不带它们，
+        换值必须整库重建——本方法正是"先 reset 再全量写入"，所以调它即可，不需要手工删目录。
         """
         source_dir = source_dir or DEFAULT_DOCS_DIR
         documents = load_documents(source_dir)
-        chunks = split_documents(documents, methods=(method,))
+        chunks = split_documents(
+            documents,
+            methods=(method,),
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
         if not chunks:
             # 明确的报错，而不是把空列表塞给 BM25Index——rank_bm25 对空语料会除零，
             # 抛出来的 ZeroDivisionError 完全看不出是"语料是空的"。
@@ -151,8 +165,9 @@ class RetrievalPipeline:
         self._ready = True
         print(
             f"[index] {len(documents)} 篇文档 -> {len(chunks)} 个分块 "
-            f"({method}), 已写入 {sidecar}"
+            f"({method}, chunk_size={chunk_size}, overlap={overlap}), 已写入 {sidecar}"
         )
+        return len(chunks)
 
     # ---- 检索 -----------------------------------------------------------
     def retrieve(self, query: str, top_k: int = 3, route: str = "hybrid") -> list[dict]:

@@ -14,11 +14,17 @@
     python scripts/eval.py --top-k 5              # 换 top_k
     python scripts/eval.py --sweep-k              # 扫 top_k=1,2,3,5 × 三条路（复现 README 两张表）
     python scripts/eval.py --sweep-k --ks 1,3,5   # 自定义扫描点
+    python scripts/eval.py --sweep-chunk-size     # 扫 chunk_size=300,400,800,1600 × 三条路
     python scripts/eval.py --json out.json        # 额外把 summary 落盘（可选）
 
 为什么要有 --route / --sweep-k：README「检索路消融」与「top-k 扫描」两张表是
 "混合检索到底带来了什么"的唯一证据（也是简历上最有价值的数字），此前只能用**改代码**的方式
 复现（`retrieve()` 写死走融合，脚本没有任何命令行开关）。现在它们是一条命令，可复核、可进 CI。
+
+为什么还要有 --sweep-chunk-size：它是**建索引时**的参数，换值要整库重建，所以不能像
+--sweep-k 那样只改检索参数；但"切分粒度影响多大"是 RAG 最常被追问的问题，答案只能实测。
+注意本开关会重建索引（chunk_id 不带 chunk_size，靠 index() 的先清空再写入保证不残留），
+跑完会自动恢复默认值。
 """
 
 import argparse
@@ -28,10 +34,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.retrieval.chunker import DEFAULT_CHUNK_SIZE
 from app.retrieval.pipeline import RetrievalPipeline
 from eval.metrics import gold_sources, is_refusal_case, summarize
 
 EVAL_FILE = Path(__file__).resolve().parents[1] / "eval" / "questions.jsonl"
+DOCS_DIR = Path(__file__).resolve().parents[1] / "data" / "docs"
 
 ROUTES = ("vector", "bm25", "hybrid")
 ROUTE_LABELS = {"vector": "仅向量", "bm25": "仅 BM25", "hybrid": "RRF"}
@@ -160,6 +168,56 @@ def sweep(
     return rows
 
 
+def sweep_chunk_size(
+    sizes: tuple[int, ...] = (300, 400, 800, 1600),
+    top_k: int = 3,
+    source_dir: str | Path | None = None,
+    restore: bool = True,
+    verbose: bool = True,
+) -> list[dict]:
+    """三条检索路 × 多个 chunk_size 的扫描表（README「chunk_size 扫描」的来源）。
+
+    与 `--sweep-k` 最大的区别：chunk_size 是**建索引时**的参数，每换一个值都要整库重建
+    （chunk_id 里不带 chunk_size，靠 index() 的"先清空再写入"保证不残留）。
+    所以本函数是**破坏性**的——它会真的重建索引，跑完把索引恢复成默认 chunk_size，
+    避免留下一个"和 README 口径不一致"的库。恢复失败会明确报错而不是静默略过。
+
+    为什么值得单独扫一次：向量路与 BM25 路对这个参数的反应完全不同——
+    块越大，一个向量里混进的论题越多、语义被平均掉，向量路单调变差；而 BM25 靠词面
+    重叠比例，几乎不受影响。这既解释了"chunk_size 怎么定"，也是混合检索价值的又一证据。
+    """
+    source_dir = source_dir or str(DOCS_DIR)
+    cases = load_cases()
+    scored = [c for c in cases if gold_sources(c)]
+    rows: list[dict] = []
+    for size in sizes:
+        pipeline = RetrievalPipeline()
+        n_chunks = pipeline.index(source_dir, chunk_size=size)
+        row: dict = {"chunk_size": size, "chunks": n_chunks}
+        for route in ROUTES:
+            results = evaluate(pipeline, cases, route=route, top_k=top_k)
+            hits = sum(1 for r in results if r["retrieval_hit"])
+            row[route] = round(hits / len(scored), 4) if scored else 0.0
+        rows.append(row)
+    # 只要**最后建的那个索引**不是默认 chunk_size，就必须再建一次把它恢复。
+    # 注意判据是 sizes[-1] 而不是 `DEFAULT_CHUNK_SIZE not in sizes`——扫描点里通常就含默认值
+    # （默认序列是 300,400,800,1600），但盘上留下的是**最后一次**建立的索引（1600），
+    # 用 `in` 判断会得出"已经恢复过了"的错误结论，把索引停在最差的那个扫描点上。
+    if restore and (not sizes or sizes[-1] != DEFAULT_CHUNK_SIZE):
+        RetrievalPipeline().index(source_dir, chunk_size=DEFAULT_CHUNK_SIZE)
+        if verbose:
+            print(f"\n  已把索引恢复为默认 chunk_size={DEFAULT_CHUNK_SIZE}")
+    if verbose:
+        print(f"\n== chunk_size 扫描（scored {len(scored)} 条有真值用例，top_k={top_k}）==")
+        print(f"  {'chunk_size':<12}{'分块数':<9}{'仅向量':<11}{'仅 BM25':<11}RRF")
+        for row in rows:
+            print(
+                f"  {row['chunk_size']:<12}{row['chunks']:<9}"
+                f"{row['vector']:<11.4f}{row['bm25']:<11.4f}{row['hybrid']:.4f}"
+            )
+    return rows
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -180,6 +238,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--ks", type=str, default="1,2,3,5", help="--sweep-k 的扫描点，逗号分隔（默认 1,2,3,5）"
     )
     parser.add_argument(
+        "--sweep-chunk-size",
+        action="store_true",
+        help="扫 chunk_size × 三条检索路（会重建索引，跑完自动恢复默认值）",
+    )
+    parser.add_argument(
+        "--sizes",
+        type=str,
+        default="300,400,800,1600",
+        help="--sweep-chunk-size 的扫描点，逗号分隔（默认 300,400,800,1600）",
+    )
+    parser.add_argument(
         "--json", dest="json_path", type=str, default=None, help="把 summary 额外写入该 JSON 文件"
     )
     return parser
@@ -191,6 +260,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.sweep_k:
         ks = tuple(int(x) for x in args.ks.split(",") if x.strip())
         sweep(ks=ks)
+        return 0
+    if args.sweep_chunk_size:
+        sizes = tuple(int(x) for x in args.sizes.split(",") if x.strip())
+        sweep_chunk_size(sizes=sizes, top_k=args.top_k)
         return 0
     run(route=args.route, top_k=args.top_k, json_path=args.json_path)
     return 0
