@@ -51,6 +51,9 @@ class Settings:
     # 后果是"索引还在、模型没了"，index_docs.py 必须重新联网下载，离线环境直接跑不起来。
     # 放到项目 data/ 下（已 gitignore）之后缓存跟着仓库走，不会平白消失。
     fastembed_cache_dir: str = os.getenv("FASTEMBED_CACHE_DIR", "./data/fastembed_cache")
+    # 注意：本字段**只在 embed_backend="flagembedding" 时被读取**（app/retrieval/embedder.py）。
+    # 默认的 fastembed 后端走的是上面的 fastembed_model，所以这个默认值在默认路径上不生效，
+    # 改它是没有用的——要换默认路径的模型请改 FASTEMBED_MODEL。
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "bge-m3")
 
     # rerank：opt-in（FlagReranker 依赖 torch，需 pip install -e ".[embed]"）

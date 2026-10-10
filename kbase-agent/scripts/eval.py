@@ -133,16 +133,20 @@ def sweep(
     rows: list[dict] = []
     for top_k in ks:
         row: dict = {"top_k": top_k}
+        raw: dict[str, float] = {}
         for route in ROUTES:
             results = evaluate(pipeline, cases, route=route, top_k=top_k)
             hits = sum(1 for r in results if r["retrieval_hit"])
+            # 保留未舍入的命中率用于算差值：拿已舍入到 4 位的小数相减会差 1 个末位
+            # （k=3 实测就是 0.0178 vs 真值 0.0179），那样 README 和 CLI 会互相打架。
+            raw[route] = hits / len(scored) if scored else 0.0
             row[route] = {
                 "hits": hits,
                 "scored": len(scored),
-                "hit_rate": round(hits / len(scored), 4) if scored else 0.0,
+                "hit_rate": round(raw[route], 4),
             }
-        best_single = max(row["vector"]["hit_rate"], row["bm25"]["hit_rate"])
-        row["rrf_minus_best_single"] = round(row["hybrid"]["hit_rate"] - best_single, 4)
+        best_single = max(raw["vector"], raw["bm25"])
+        row["rrf_minus_best_single"] = round(raw["hybrid"] - best_single, 4)
         rows.append(row)
     if verbose:
         print(f"\n== top-k 扫描（scored {len(scored)} 条有真值用例；差值为负表示融合不如单路）==")

@@ -27,8 +27,11 @@ venv/
 *-shm
 
 # 评测报告默认不入库：只保留被显式选为"基线/回归证据"的报告
-# （当前入库的 baseline.json / fullrun-verify.json 是手动 git add 进来的，
-#   日后新增的报告会被这条规则挡在仓库外，避免 docs/eval-reports/ 无限膨胀）
+# （docs/eval-reports/ 下入库的 6 份都是手动 `git add -f` 进来的——
+#   新增报告会被这条规则挡在仓库外，必须 -f 才能进，避免该目录无限膨胀。
+#   注意：这条规则是"默认排除 + 手工放行"，不是"入库名单"，
+#   所以新加一份基线后一定要 `git status` 确认它真的被跟踪了，
+#   否则 README 引用了它、clone 的人却看不到。）
 kbase-agent/docs/eval-reports/*.json
 
 # IDE
