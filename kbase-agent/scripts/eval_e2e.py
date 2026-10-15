@@ -88,7 +88,14 @@ def _refusal_ok(answer: str, case: dict) -> tuple[bool, list[str]]:
 
 
 def _load_cases() -> list[dict]:
-    return [json.loads(line) for line in EVAL_FILE.read_text(encoding="utf-8").splitlines()]
+    # 跳过空行：questions.jsonl 是**人工维护**的金标集，编辑时留一个空行很常见，
+    # 而 json.loads("") 会直接把整条 CLI 打挂，且报错完全看不出是第几行的空行。
+    # scripts/eval.py 的同类函数一直是跳过空行的，这里漏了。
+    return [
+        json.loads(line)
+        for line in EVAL_FILE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _percentile(values: list[int | float], q: float) -> float:

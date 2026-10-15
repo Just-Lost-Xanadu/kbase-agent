@@ -82,10 +82,19 @@ async def ensure_services(app: FastAPI):
     if _services_ready(app):
         return app.state.pipeline, app.state.runtime
 
+    # 锁要**和它所属的事件循环一起**缓存：Python 3.10+ 的 asyncio.Lock 在第一次
+    # acquire 时绑定当前 loop，换一个 loop 再用会直接抛
+    # `RuntimeError: <asyncio.Lock> is bound to a different event loop` ——
+    # 而初始化失败（例如没配 key）时 services_ok 一直是 False、services_task 被清空，
+    # 下一次请求会真的走到这把锁上。同一个 app 对象被两个 loop 驱动
+    # （TestClient 建一次、asyncio.run 再建一次）就会踩到；
+    # 生产 uvicorn 是单 loop，不受影响。loop 变了就重建一把。
+    loop = asyncio.get_running_loop()
     lock = getattr(app.state, "services_lock", None)
-    if lock is None:
+    if lock is None or getattr(app.state, "services_lock_loop", None) is not loop:
         lock = asyncio.Lock()
         app.state.services_lock = lock
+        app.state.services_lock_loop = loop
     async with lock:
         if _services_ready(app):
             return app.state.pipeline, app.state.runtime

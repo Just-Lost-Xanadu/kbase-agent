@@ -437,6 +437,33 @@ def _split_verified_citations(
     return verified, unverified
 
 
+def _truncate_tool_output(text: str, limit: int) -> str:
+    """截断工具输出，但**不让【来源：】标记被一起截掉**。
+
+    为什么要在截断之上再补这一手：`_parse_sources` 只能从"真正回给模型的那段文本"里
+    扫来源标记。工具原始输出超过上限时 `truncate_tool_output` 会丢掉中间一段，
+    若某个 `【来源：X】` 正好落在被丢掉的区间，`retrieved_sources` 就少了那一篇；
+    而答案正文里明明引用了它，于是 `_split_verified_citations` 会把**真实引用**
+    误判进 `unverified_sources`，前端打出"⚠ 查无此据"——把正确引用说成编造，
+    与"引用溯源"这个核心卖点的方向正好相反。
+
+    触发条件很明确：原始输出 > limit，且某个来源标记落在
+    [60%·limit, len-limit) 这段被丢弃的区间里。默认配置
+    （top_k=3 + chunk_size=800，单次检索输出约 2.5K 字符）不会触发；
+    但 `--sweep-chunk-size` 里的 1600、或调大 top_k 就会。
+
+    补回去的是**标记行本身**，不改动保留下来的正文，也不改变截断语义
+    （它只是把"不该被截掉的东西"捞回来；多出来的长度以来源条数为界，最多 top_k 条）。
+    """
+    truncated = truncate_tool_output(text, limit)
+    kept = set(_CITATION_RE.findall(truncated))
+    dropped = [name for name in _CITATION_RE.findall(text) if name not in kept]
+    if not dropped:
+        return truncated
+    salvaged = list(dict.fromkeys(dropped))   # 去重且保持出现顺序
+    return truncated + "\n" + "\n".join(f"【来源：{name}】" for name in salvaged)
+
+
 def _final_answer(messages: list) -> str:
     """取"最后一条非工具调用的 AI 消息"作为答案。
 
@@ -610,7 +637,7 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                 raw = await asyncio.wait_for(
                     item["tool"].ainvoke(args), timeout=AgentLimits.step_timeout_seconds
                 )
-                item["content"] = truncate_tool_output(
+                item["content"] = _truncate_tool_output(
                     _text_of(raw), AgentLimits.max_tool_output_chars
                 )
             except TimeoutError:
@@ -628,7 +655,23 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                 if _is_transport_failure(exc):
                     await tool_session.invalidate(lease.generation)
                     try:
-                        fresh = await tool_session.ensure()
+                        # 这条路径同样是"拉起子进程 + 握手 + 子进程内冷加载索引"
+                        # （与 tools_node 开头那次 ensure() 是同一件事），所以必须套同样的
+                        # step_timeout。不套的话：子进程能启动但握手卡住（例如索引库被锁）时
+                        # 这里永不返回，而 step_timeout 只包住了单次 ainvoke，
+                        # 整个请求会一直挂着——"工具慢"就被放大成"请求永久挂死"。
+                        fresh = await asyncio.wait_for(
+                            tool_session.ensure(),
+                            timeout=AgentLimits.step_timeout_seconds,
+                        )
+                    except TimeoutError:
+                        item["content"] = (
+                            f"工具 {name} 调用失败：MCP 会话已断开，"
+                            f"重建超时（>{AgentLimits.step_timeout_seconds}s）"
+                        )
+                        item["ok"] = False
+                        item["note"] = item["content"][:160]
+                        return
                     except ToolSessionUnavailable as rebuild_exc:
                         item["content"] = (
                             f"工具 {name} 调用失败：MCP 会话已断开且重建失败"
@@ -648,7 +691,7 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                             retry_tool.ainvoke(args),
                             timeout=AgentLimits.step_timeout_seconds,
                         )
-                        item["content"] = truncate_tool_output(
+                        item["content"] = _truncate_tool_output(
                             _text_of(raw), AgentLimits.max_tool_output_chars
                         )
                         item["retried"] = "会话失效后重建，重试成功"
@@ -912,7 +955,12 @@ async def create_runtime() -> AgentRuntime:
         # 建会话并取工具表：启动即暴露"子进程起不来/索引坏了"，而不是等到第一次提问。
         # 这一版工具表在服务生命周期内复用（不再每次调用新起子进程），
         # 因此这次启动开销从"每次都付"变成"只付一次"。
-        lease = await tool_session.ensure()
+        #
+        # 同样套 step_timeout：这里是 ensure_services 的初始化 task，调用方 await 的是
+        # 这个 task；如果它永不返回，每个请求都会一直挂着，连"503 服务未就绪"都拿不到。
+        lease = await asyncio.wait_for(
+            tool_session.ensure(), timeout=AgentLimits.step_timeout_seconds
+        )
         tools = lease.tools
         llm = llm.bind_tools(tools)
         graph = _build_graph(llm, tool_session, checkpointer=saver)

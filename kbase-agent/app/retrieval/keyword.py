@@ -55,7 +55,15 @@ class BM25Index:
 
     def __init__(self, chunks: Iterable[dict]):
         self._chunks = list(chunks)
-        self._model = BM25Okapi([tokenize(c["content"]) for c in self._chunks])
+        tokenized = [tokenize(c["content"]) for c in self._chunks]
+        # 全语料都没有 token（例如内容全是标点、空白或 emoji）时，
+        # rank_bm25 的 avgdl = 总词数 / 文档数 = 0，get_scores 里的
+        # `doc_len / self.avgdl` 直接抛 ZeroDivisionError。
+        # 这种情况在语义上等价于"关键词路没有任何可召回的内容"，所以干脆不进模型、
+        # search 返回空列表——而不是让整条检索链路崩掉。
+        # ⚠️ pipeline 的空语料护栏只覆盖"chunks 为空"，**覆盖不到"chunks 非空但全无 token"**，
+        # 所以这道判断必须放在这里（两个同类情况、只防了其中一个）。
+        self._model = BM25Okapi(tokenized) if any(tokenized) else None
 
     def search(self, query: str, top_k: int = 5) -> list[dict]:
         """按 BM25 打分取 top_k 个 chunk。
@@ -68,6 +76,8 @@ class BM25Index:
         差异才出现（k=3：仅向量 0.8750 / 仅 BM25 0.9643 / RRF 0.9821），BM25 这一路的独立
         召回价值自此有数据支撑。两轮实测数字见 kbase-agent/README.md「效果度量 · 检索路消融」。
         """
+        if self._model is None:
+            return []          # 见 __init__：全语料都没有 token，关键词路无内容可召回
         scores = self._model.get_scores(tokenize(query))
         ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
         return [

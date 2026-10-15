@@ -264,6 +264,10 @@
   // —— 发送：走 /api/chat/stream（SSE 流式），本会话只发最新一条 ——
   async function ask(q) {
     if (!q.trim() || sendBtn.disabled) return;
+    // 记住"这次提问属于哪个会话"：流式回答期间用户可能点「＋ 新对话」或点别的历史会话，
+    // 那时 loadHistory/newConversation 会 log.innerHTML='' 把本函数的 placeholder **摘出文档**，
+    // 并把 labelEl 指到新会话的标题元素上。详见下面写回结果前的守卫。
+    const mySession = sessionId;
     addMsg('user', q);
     input.value = '';
     setBusy(true);
@@ -366,6 +370,11 @@
       const tail = buf.slice(-120);
       buf = '';
       throwIfNoAnswer();
+      // 流式期间用户切了会话 → 放弃写回。两个后果，都是静默的：
+      //   ① placeholder 已被 innerHTML='' 摘出文档，往里写答案用户永远看不到（也不报错）；
+      //   ② 第 382 行的 labelEl 此刻指向**新会话**的标题，会被这条旧问题覆盖掉。
+      // 服务的会话记录不受影响（落库发生在服务端），只是本页面不再回填。
+      if (mySession !== sessionId) return;
       if (finalAnswer) {
         localStorage.setItem(LS_KEY, sessionId);
         placeholder.className = 'msg bot';

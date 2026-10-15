@@ -190,23 +190,37 @@ def sweep_chunk_size(
     cases = load_cases()
     scored = [c for c in cases if gold_sources(c)]
     rows: list[dict] = []
-    for size in sizes:
-        pipeline = RetrievalPipeline()
-        n_chunks = pipeline.index(source_dir, chunk_size=size)
-        row: dict = {"chunk_size": size, "chunks": n_chunks}
-        for route in ROUTES:
-            results = evaluate(pipeline, cases, route=route, top_k=top_k)
-            hits = sum(1 for r in results if r["retrieval_hit"])
-            row[route] = round(hits / len(scored), 4) if scored else 0.0
-        rows.append(row)
-    # 只要**最后建的那个索引**不是默认 chunk_size，就必须再建一次把它恢复。
-    # 注意判据是 sizes[-1] 而不是 `DEFAULT_CHUNK_SIZE not in sizes`——扫描点里通常就含默认值
-    # （默认序列是 300,400,800,1600），但盘上留下的是**最后一次**建立的索引（1600），
-    # 用 `in` 判断会得出"已经恢复过了"的错误结论，把索引停在最差的那个扫描点上。
-    if restore and (not sizes or sizes[-1] != DEFAULT_CHUNK_SIZE):
-        RetrievalPipeline().index(source_dir, chunk_size=DEFAULT_CHUNK_SIZE)
-        if verbose:
-            print(f"\n  已把索引恢复为默认 chunk_size={DEFAULT_CHUNK_SIZE}")
+    built: list[int] = []
+    try:
+        for size in sizes:
+            pipeline = RetrievalPipeline()
+            n_chunks = pipeline.index(source_dir, chunk_size=size)
+            built.append(size)          # 只有**真正建成**的扫描点才记进来
+            row: dict = {"chunk_size": size, "chunks": n_chunks}
+            for route in ROUTES:
+                results = evaluate(pipeline, cases, route=route, top_k=top_k)
+                hits = sum(1 for r in results if r["retrieval_hit"])
+                row[route] = round(hits / len(scored), 4) if scored else 0.0
+            rows.append(row)
+    finally:
+        # 只要**最后建的那个索引**不是默认 chunk_size，就必须再建一次把它恢复。
+        # ⚠️ 恢复必须放在 finally 里：这个命令要连着重建 4 次索引（每次几十秒），
+        # 中途 Ctrl-C 或任何异常都很常见。恢复语句原先在循环**之后**，
+        # 一旦中断就永远不会执行——盘上会停在扫描到一半的那个 chunk_size
+        # （实测停在 chunk_size=300 / 87 个分块），而 `is_indexed()` 仍为 True、
+        # **不会自愈**，之后的检索与评测数字会静默变形。
+        #
+        # 判据用"最后**真正建成**的 size"（built[-1]），不是 sizes[-1]、也不是
+        # `DEFAULT_CHUNK_SIZE not in sizes`：
+        #   · sizes[-1] 在中断时可能是一个根本没轮到的扫描点（默认序列是 300,400,800,1600，
+        #     停在 400 时 sizes[-1] 仍是 1600 → 会误判成"需要恢复"倒也无妨，
+        #     但如果 sizes 传的是 [800] 且它在写入途中失败，sizes[-1]==800 就会误判成"不用恢复"）；
+        #   · `not in` 更错：盘上留下的是**最后一次建立**的索引，含默认值不代表盘上是默认值。
+        last_built = built[-1] if built else None
+        if restore and last_built != DEFAULT_CHUNK_SIZE:
+            RetrievalPipeline().index(source_dir, chunk_size=DEFAULT_CHUNK_SIZE)
+            if verbose:
+                print(f"\n  已把索引恢复为默认 chunk_size={DEFAULT_CHUNK_SIZE}")
     if verbose:
         print(f"\n== chunk_size 扫描（scored {len(scored)} 条有真值用例，top_k={top_k}）==")
         print(f"  {'chunk_size':<12}{'分块数':<9}{'仅向量':<11}{'仅 BM25':<11}RRF")

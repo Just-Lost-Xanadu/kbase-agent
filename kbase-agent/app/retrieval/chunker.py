@@ -16,6 +16,13 @@ def fixed_size_chunk(
     overlap(150) 让相邻窗口共享重叠段，降低"关键句恰好落在切缝"导致的召回漏失。
     step = chunk_size - overlap 是滑窗步长（每段前进这么多，窗口 itself 仍是 chunk_size 长）。
     """
+    if overlap < 0:
+        # 必须显式拦：overlap 为负时 step = chunk_size - overlap **大于** chunk_size，
+        # 相邻窗口之间会出现一段谁都覆盖不到的空洞——实测 200 字符的文本、
+        # chunk_size=50、overlap=-20 时，有 150 个字符不在任何分块里，而且**全程不报错**。
+        # （recursive 那条路由 langchain 自己抛 "chunk_overlap must be >= 0"，
+        #   所以只有 fixed 会静默丢文本——两个同类函数、只给其中一个加了校验。）
+        raise ValueError("overlap 不能为负（负值会在相邻分块之间留下没人覆盖的空洞）")
     if chunk_size <= overlap:
         raise ValueError("chunk_size 必须大于 overlap")
     if not text:
