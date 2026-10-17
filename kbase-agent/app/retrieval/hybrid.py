@@ -33,6 +33,12 @@ class Reranker:
         scores = self.model.compute_score(pairs)
         if hasattr(scores, "tolist"):  # numpy
             scores = scores.tolist()
+        # FlagReranker 对**单条** pair 常直接返回 float，而不是 list；此时 float 没有
+        # tolist()，直接 zip(candidates, scores) 会抛 "float is not iterable"。
+        # 候选只剩 1 条时（top_k=1、或粗召回只命中一段）这是必然路径，于是"打开 rerank
+        # 反而更容易 500"——与它要解决问题的方向正好相反。
+        if isinstance(scores, (int, float)):
+            scores = [float(scores)]
         ranked = sorted(
             zip(candidates, scores), key=lambda pair: pair[1], reverse=True
         )[:top_k]
