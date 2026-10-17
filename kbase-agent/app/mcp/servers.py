@@ -100,8 +100,20 @@ def _load_records() -> list[dict]:
     if _records_cache is not None and _records_cache[0] == key:
         return _records_cache[1]
 
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # 面向用户可编辑的数据文件：除了坏 JSON 行，还可能被存成 GBK/ANSI
+        # （Windows 记事本默认编码就可能是 ANSI）。此前这里直接抛 UnicodeDecodeError，
+        # 整个工具变成"工具失败"；现在按"读不到记录"处理，并说明文件与原因。
+        print(
+            f"[mcp] 无法以 UTF-8 读取 {path}：{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return []
+
     records: list[dict] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for lineno, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
         try:
