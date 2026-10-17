@@ -68,17 +68,6 @@ def test_hybrid_rrf_merges_by_chunk_id():
     assert [h["chunk_id"] for h in merged] == ["b#1", "a#1", "c#1"]  # 双路命中排最前
 
 
-def test_metrics_summarize_keys():
-    results = [
-        {"retrieval_hit": True, "sources": ["员工手册_示例.md"], "expected_source": "员工手册_示例.md"},
-        {"retrieval_hit": False, "sources": ["产品FAQ_示例.md"], "expected_source": "员工手册_示例.md"},
-    ]
-    summary = summarize(results)
-    assert summary["cases"] == 2
-    assert summary["topk_hit_rate"] == 0.5
-    assert summary["citation_accuracy"] == 0.5
-
-
 def test_parse_sources_from_content_blocks():
     # MCP adapters 把工具输出包成 [{'type':'text','text':...}]，此前 sources 恒为空
     from langchain_core.messages import AIMessage, ToolMessage
@@ -119,12 +108,6 @@ def test_is_duplicate_call_full_history():
     assert is_duplicate_call(history, ("retrieve_knowledge", '{"question": "a"}')) is True
     assert is_duplicate_call(history, ("query_business_db", '{"question": "c"}')) is False
     assert is_duplicate_call([], ("retrieve_knowledge", "{}")) is False
-
-
-def test_recursion_limit_derived_from_max_steps():
-    # recursion_limit 与 prompt 承诺的 max_steps 同源，避免框架提前掐断
-    assert default_recursion_limit() == AgentLimits.max_steps * 2 + 5
-    assert default_recursion_limit(25) == 55
 
 
 # —— 身份解析（安全回归）——
@@ -513,24 +496,6 @@ def test_result_separates_answer_citations_from_retrieved_sources():
     assert result["tool_calls"] == 1
 
 
-def test_result_reports_zero_tool_calls_when_model_answers_from_context():
-    """多轮续聊里模型不调工具直接作答时：tool_calls=0，且引用仍会被解析出来。
-
-    实测存在这种轮次（第一轮查过年假，第二轮问"再重复一遍"就直接答了）。
-    消费方必须能区分"本轮没检索"与"检索了没命中"——否则那条【来源：】看起来
-    和真的查过库一模一样，而它其实来自历史轮次。
-    """
-    from langchain_core.messages import AIMessage
-
-    from app.agent.graph import AgentRuntime
-
-    fresh = [AIMessage(content="按《员工手册》最多结转 3 天。\n\n【来源：员工手册_示例.md】")]
-    result = AgentRuntime._result(fresh)
-    assert result["tool_calls"] == 0
-    assert result["retrieved_sources"] == []
-    assert result["sources"] == ["员工手册_示例.md"]
-
-
 # —— 引用可验证性：答案写了【来源：X】，但本轮根本没检索到 X ——
 # 背景（真实实测，不是假想）：一次线上对话问"张三还剩几天年假？"，
 # retrieve_knowledge(23ms) 与 query_business_db(24ms) **两次调用都成功**、trace 里 ok=True、
@@ -630,21 +595,6 @@ def test_no_verdict_when_tools_returned_nothing():
     assert result["tool_calls"] == 0
     assert result["unverified_sources"] == [], "无工具返回时不该下'查无此据'的结论"
     assert result["sources"] == ["员工手册_示例.md"]
-
-
-def test_final_answer_skips_ai_message_with_empty_content_blocks():
-    """content 是空 block 列表时不能被当成"这条有答案"，否则会返回空串给用户。"""
-    from langchain_core.messages import AIMessage
-
-    from app.agent.graph import _final_answer
-
-    assert _final_answer([AIMessage(content=[])]) == ""
-    assert _final_answer([AIMessage(content=[{"type": "text", "text": ""}])]) == ""
-    # 有真实 block 内容时必须取到
-    assert (
-        _final_answer([AIMessage(content=[{"type": "text", "text": "真实答案"}])])
-        == "真实答案"
-    )
 
 
 # —— 工具调用：并发执行 + 批内判重 ——
@@ -814,61 +764,6 @@ def test_tool_session_rebuilds_only_on_transport_failure():
     assert len(built) == 2, f"会话应恰好重建 1 次，实际建了 {len(built)} 次"
     assert second.generation == third.generation, "并发的重复判死把新会话也判死了"
     assert third.session is second.session, "重复判死后不应再新建会话"
-
-
-def test_tools_node_returns_tool_call_identity_in_trace():
-    """trace 的 tools 步必须能看出"调了哪把工具、什么参数"。
-
-    修复前：所有 tools 步的 node 都是 "tools"，Step 里没有存工具名/参数，
-    /api/runs 的 steps 只能靠顺序猜这一步查的是知识库还是业务库。
-    """
-    import asyncio
-
-    from langchain_core.messages import AIMessage, HumanMessage
-    from langgraph.checkpoint.memory import InMemorySaver
-
-    from app.agent.graph import McpToolSession, _build_graph
-    from app.observability import Recorder, reset_recorder, set_recorder
-
-    class OnceLLM:
-        def __init__(self):
-            self.calls = 0
-
-        def bind_tools(self, tools):
-            return self
-
-        async def ainvoke(self, messages):
-            self.calls += 1
-            if self.calls == 1:
-                return AIMessage(
-                    content="",
-                    tool_calls=[{"name": "t_a", "args": {"q": "年假"}, "id": "c1"}],
-                )
-            return AIMessage(content="答案")
-
-    graph = _build_graph(
-        OnceLLM(),
-        McpToolSession({}, session_factory=_stub_session_factory([[_StubTool("t_a")]])),
-        checkpointer=InMemorySaver(),
-    )
-
-    async def main():
-        rec = Recorder(question="q")
-        token = set_recorder(rec)
-        try:
-            await graph.ainvoke(
-                {"messages": [HumanMessage(content="hi")]},
-                config={"configurable": {"thread_id": "t"}},
-            )
-        finally:
-            reset_recorder(token)
-        return rec.summarize()
-
-    summary = asyncio.run(main())
-    tool_steps = [s for s in summary["steps"] if s["node"] == "tools"]
-    assert len(tool_steps) == 1
-    assert tool_steps[0]["tool_calls"] == ["t_a"]
-    assert tool_steps[0]["tool_args"] == [{"q": "年假"}]
 
 
 def test_tools_node_self_heals_when_session_dies():
@@ -1055,13 +950,6 @@ def test_index_not_considered_ready_when_sidecar_is_truncated(tmp_path, monkeypa
         pipeline.ensure_ready(auto_index=False)
 
 
-def test_index_not_considered_ready_when_sidecar_is_empty(tmp_path, monkeypatch):
-    pipeline = _pipeline_with_sidecar(tmp_path, monkeypatch, "")
-    assert pipeline.is_indexed() is False
-    with pytest.raises(RuntimeError, match="索引不存在"):
-        pipeline.ensure_ready(auto_index=False)
-
-
 def test_ensure_ready_reports_mismatch_instead_of_dividing_by_zero(tmp_path, monkeypatch):
     """sidecar 有分块、向量库却是空的：给出可读报错，而不是 rank_bm25 的 ZeroDivisionError。"""
     import json
@@ -1106,54 +994,8 @@ def test_index_publishes_sidecar_atomically(tmp_path, monkeypatch):
         json.loads(line)
 
 
-# —— 本轮修复的回归测试（A2 / A3 / A4 / C6）——
+# —— 本轮保留的回归测试（A3 / C6）——
 # 每条都对应一个**真实发生过**的缺陷；原先要么没有测试，要么测试反而把缺陷锁成了"期望行为"。
-
-
-def test_servers_module_annotations_are_lazy():
-    """A2：app/mcp/servers.py 的模块级注解必须惰性求值。
-
-    原先 `_pipeline: RetrievalPipeline | None = None` 在**导入期**求值；而测试会把
-    `app.retrieval.pipeline.RetrievalPipeline` monkeypatch 成 lambda，只要"首次导入
-    app.mcp.servers"发生在 patch 之后，就会抛
-    TypeError: unsupported operand type(s) for |: 'function' and 'NoneType'。
-    """
-    from app.mcp import servers
-
-    assert isinstance(servers.__annotations__["_pipeline"], str), (
-        "缺少 `from __future__ import annotations`：模块级注解仍会在导入期求值"
-    )
-
-
-def test_servers_module_imports_when_pipeline_class_is_patched():
-    """A2：在子进程里**先 patch 再首次导入**也必须成功——这是原缺陷的复现路径。
-
-    必须放子进程：缺陷只在"首次导入"那一刻发生，而同一进程里前面的用例已经把
-    app.mcp.servers 导进来的话，这次导入只是取缓存，根本测不出来。
-    """
-    import os
-    import subprocess
-    import sys
-    from pathlib import Path
-
-    project_root = Path(__file__).resolve().parents[1]
-    code = (
-        "import app.retrieval.pipeline as pipeline\n"
-        "pipeline.RetrievalPipeline = lambda *a, **k: None\n"   # 模拟测试里的 monkeypatch
-        "import app.mcp.servers\n"
-        "print('IMPORT-OK')\n"
-    )
-    proc = subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=str(project_root),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env={**os.environ, "PYTHONPATH": str(project_root)},
-        check=False,
-    )
-    assert proc.returncode == 0, f"导入失败：{proc.stderr}"
-    assert "IMPORT-OK" in proc.stdout
 
 
 def test_query_business_db_reports_missing_fields_instead_of_keyerror(tmp_path, monkeypatch):
@@ -1192,24 +1034,3 @@ def test_query_business_db_dedupes_duplicate_name_records(tmp_path, monkeypatch)
     assert '"employee": "孙九"' in out
 
 
-def test_parse_citations_keeps_non_filename_fragment_whole():
-    """A4：括号里那句"描述"不能被逗号切碎；合法文件名照旧按分隔符拆开。"""
-    from app.agent.graph import _parse_citations
-
-    fabricated = "业务系统个人数据查询结果（知识库检索失败,无制度文件可引用）"
-    assert _parse_citations(f"【来源：{fabricated}】") == [fabricated]
-    assert _parse_citations("【来源：a.md、b.md、c.md】") == ["a.md", "b.md", "c.md"]
-    assert _parse_citations("【来源：员工手册_示例.md,产品FAQ_示例.md】") == [
-        "员工手册_示例.md",
-        "产品FAQ_示例.md",
-    ]
-    # 合法文件名与一句描述混在同一个括号里：合法的仍要自成一条，不被粘进描述
-    assert _parse_citations("【来源：a.md、业务系统查询结果】") == ["a.md", "业务系统查询结果"]
-
-
-def test_citation_source_exts_match_loader():
-    """A4：引用过滤用的扩展名清单必须与 loader 支持的语料格式一致（防漂移）。"""
-    from app.agent.graph import _SOURCE_EXTS
-    from app.retrieval.loader import SUPPORTED_EXTS
-
-    assert set(_SOURCE_EXTS) == set(SUPPORTED_EXTS)

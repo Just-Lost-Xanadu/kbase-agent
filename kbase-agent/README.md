@@ -1,5 +1,7 @@
 # kbase-agent
 
+> **测试口径（2026-10-17 晚精简后）**：`pytest -q` → kbase-agent **60 passed**、ecommerce-dw **40 passed**、mcp-tools **30 passed**，合计 **130**。README 内的历史段落保留精简前的 77/51/38。
+
 **企业知识库 + 工具调用 Agent（单 Agent）**：基于 LangGraph 的 ReAct 式工具循环，RAG 检索与业务工具经 **MCP 协议真接入**（stdio）；配**两层评测 Harness**（60 条金标：检索层 + 端到端回归，含多跳/冲突/应拒答三类难例）、SQLite 会话持久化、trace/成本可观测与护栏。
 
 > **与姊妹项目 `mcp-tools` 的关系**（两仓库是**一个系统的两层**，不是两个重复 demo）：
@@ -40,7 +42,7 @@ app/
 eval/                  # 60 条评测集（含多跳/冲突/应拒答）+ 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测（77 项，`pytest` 实测 77 passed）
+tests/                 # smoke + 纯逻辑单测（60 项，`pytest` 实测 60 passed）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
 docs/

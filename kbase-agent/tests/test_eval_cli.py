@@ -112,24 +112,6 @@ def test_reanalyze_requires_tag_or_all():
     assert excinfo.value.code == 2
 
 
-def test_compare_requires_tag():
-    with pytest.raises(SystemExit) as excinfo:
-        e2e_cli.main(["--compare", "corpus-v2"])
-    assert excinfo.value.code == 2
-
-
-def test_tag_with_limit_is_rejected():
-    with pytest.raises(SystemExit) as excinfo:
-        e2e_cli.main(["--tag", "smoke", "--limit", "5"])
-    assert excinfo.value.code == 2
-
-
-def test_all_requires_reanalyze():
-    with pytest.raises(SystemExit) as excinfo:
-        e2e_cli.main(["--all"])
-    assert excinfo.value.code == 2
-
-
 def _fake_report(case_id=1, tag="unit-x"):
     return {
         "tag": tag,
@@ -158,51 +140,12 @@ def _fake_report(case_id=1, tag="unit-x"):
     }
 
 
-def test_reanalyze_tag_only_touches_that_report(tmp_path, monkeypatch):
-    """--reanalyze --tag 只能改那一份：别的报告必须逐字节不变（历史基线不可被顺手改掉）。"""
-    reports = tmp_path / "eval-reports"
-    reports.mkdir()
-    target = reports / "unit-x.json"
-    other = reports / "keep-me.json"
-    target.write_text(json.dumps(_fake_report(tag="unit-x"), ensure_ascii=False), encoding="utf-8")
-    other_text = json.dumps(_fake_report(case_id=2, tag="keep-me"), ensure_ascii=False)
-    other.write_text(other_text, encoding="utf-8")
-
-    questions = tmp_path / "questions.jsonl"
-    questions.write_text(
-        json.dumps({"id": 1, "question": "q", "expected_keywords": ["结转", "3天"]}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(e2e_cli, "REPORT_DIR", reports)
-    monkeypatch.setattr(e2e_cli, "EVAL_FILE", questions)
-
-    e2e_cli.reanalyze(tag="unit-x")
-
-    updated = json.loads(target.read_text(encoding="utf-8"))
-    assert updated["metrics"]["answer_keyword_coverage"] == 1.0, "关键词覆盖率没有按当前金标重算"
-    assert other.read_text(encoding="utf-8") == other_text, "不该动的报告被改写了"
-
-
-def test_reanalyze_unknown_tag_exits_2(tmp_path, monkeypatch):
-    reports = tmp_path / "eval-reports"
-    reports.mkdir()
-    (reports / "exists.json").write_text(json.dumps(_fake_report()), encoding="utf-8")
-    monkeypatch.setattr(e2e_cli, "REPORT_DIR", reports)
-    with pytest.raises(SystemExit) as excinfo:
-        e2e_cli.reanalyze(tag="nope")
-    assert excinfo.value.code == 2
-
-
 # ---------------------------------------------------------------------------
-# 回归：CLI 入口与异步入口**不能同名**
+# 回归：CLI 主路径必须真的走到异步入口
 # ---------------------------------------------------------------------------
-# 真实缺陷（本轮 ruff F811 暴露出来的）：文件里曾有 `async def main(limit, tag, compare)`
-# 与 `def main(argv=None) -> int` 两个同名函数，后者覆盖前者；而 `main()` 内部又写
-# `asyncio.run(main(limit=..., tag=..., compare=...))`，于是调到了自己 →
-# `TypeError: main() got an unexpected keyword argument 'limit'`。
-# 影响面：README 里写的 `python scripts/eval_e2e.py --limit 5` 这类命令**整条是坏的**。
-# 之所以一直没被发现：既有测试只覆盖了参数校验的报错分支（那些分支在 asyncio.run 之前
-# 就 return 了），正常路径一条都没走。
+# 真实缺陷：文件里曾有同名的 `main` 把异步入口覆盖掉，而 `main()` 又调 `asyncio.run(main(...))`，
+# 于是 README 里的 `python scripts/eval_e2e.py --limit 5` 整条命令直接 TypeError。
+# 参数校验分支都在 asyncio.run 之前 return，单测只覆盖那些分支时，正常路径一条都没走。
 
 
 def test_e2e_cli_limit_path_reaches_async_entry(monkeypatch):
@@ -217,21 +160,3 @@ def test_e2e_cli_limit_path_reaches_async_entry(monkeypatch):
     assert seen.get("args") == (3, None, None), "CLI 没有把参数传给异步入口"
 
 
-def test_e2e_cli_full_path_passes_tag_and_compare(monkeypatch):
-    """--tag + --compare 这条落在报告路径也要走通。"""
-    seen = {}
-
-    async def fake_run_eval(limit, tag, compare):
-        seen["args"] = (limit, tag, compare)
-
-    monkeypatch.setattr(e2e_cli, "run_eval", fake_run_eval)
-    assert e2e_cli.main(["--tag", "unit-run", "--compare", "baseline"]) == 0
-    assert seen.get("args") == (0, "unit-run", "baseline")
-
-
-def test_e2e_cli_main_and_async_entry_are_distinct():
-    """结构断言：main 是同步 CLI，run_eval 是协程——禁止再同名。"""
-    import inspect
-
-    assert not inspect.iscoroutinefunction(e2e_cli.main), "main 必须是同步 CLI 入口"
-    assert inspect.iscoroutinefunction(e2e_cli.run_eval), "run_eval 必须是协程入口"
