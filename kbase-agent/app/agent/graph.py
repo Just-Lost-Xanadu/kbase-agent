@@ -235,6 +235,10 @@ class AgentState(TypedDict):
     # 跨轮次读回的条目与本次的 tuple key 永不相等 —— 这正是期望行为：
     # 同会话重复提问应当重新检索拿新数据，而不是复用上一轮的旧上下文。
     tool_call_history: list[tuple[str, str]]
+    # 本轮**实际执行**的工具调用数（不含"未找到工具"和"重复调用被跳过"）。
+    # 每轮开始时由 ainvoke/astream 置 0；不能靠数 ToolMessage——被跳过的重复调用
+    # 也会生成一条 ToolMessage，按消息数统计会把它算成"执行过"。
+    tool_call_count: int
 
 
 # ---- LLM 工厂（原 app/llm.py，并入本文件：唯一消费者就是本模块的 create_runtime）----
@@ -489,6 +493,42 @@ def _final_answer(messages: list) -> str:
     return ""
 
 
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    """LLM 往返的瞬时失败（网络抖动、限流、网关 5xx），值得重试一次。
+
+    注意这与工具会话的传输层失败不是一回事：这里只包住 `llm.ainvoke`，
+    不碰 MCP 会话；且只对明确可重试的信号重试，400/401/内容错误直接上抛。
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "connection", "timeout", "timed out", "rate limit", "429",
+            "502", "503", "504", "overloaded", "temporarily unavailable",
+        )
+    )
+
+
+async def _ainvoke_with_retry(llm, messages, attempts: int = 2):
+    """LLM 调用：瞬时错误重试一次，其余错误保持原样上抛。
+
+    背景：端到端评测里遇到过 `OpenAIConnectionError: Connection error.`——
+    一次网络抖动就会让一条用例变成 FAIL，而它既不是模型答错、也不是代码错。
+    重试只做一次，避免把限流/故障放大成更长的等待。
+    """
+    last: BaseException | None = None
+    for attempt in range(attempts):
+        try:
+            return await llm.ainvoke(messages)
+        except Exception as exc:
+            last = exc
+            if attempt + 1 >= attempts or not _is_transient_llm_error(exc):
+                raise
+            await asyncio.sleep(0.5 * (attempt + 1))
+    assert last is not None
+    raise last
+
+
 def _usage_tokens(message) -> tuple[int, int]:
     """从 LLM 返回消息里取 token 用量（兼容 usage_metadata / token_usage）。"""
     usage = getattr(message, "usage_metadata", None)
@@ -512,7 +552,7 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
         rec: Recorder | None = get_recorder()
         t0 = now_ms()
         try:
-            response = await llm.ainvoke(state["messages"])
+            response = await _ainvoke_with_retry(llm, state["messages"])
             ok, note = True, ""
         except Exception as exc:  # noqa: BLE001
             response = None
@@ -735,11 +775,14 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                     step.note = (step.note + "；" + item["retried"]).strip("；")
                 rec.add(step)
 
+        executed = sum(1 for item in planned if item["tool"] is not None)
         return {
             "messages": new_messages,
             # 与串行实现口径一致：整批调用的 key 都进历史（含被跳过/未找到的），
             # 只保留最近 max_steps 条；用 seen 而不是重算，避免与判重时的顺序漂移。
             "tool_call_history": (history + [i["key"] for i in planned])[-AgentLimits.max_steps :],
+            # 只累计真正派出去执行的调用；跳过/未知工具不计入"执行数"。
+            "tool_call_count": int(state.get("tool_call_count", 0)) + executed,
         }
 
     graph = StateGraph(AgentState)
@@ -819,15 +862,18 @@ class AgentRuntime:
 
     async def ainvoke(self, messages: list[dict], session_id: str | None = None) -> dict:
         lc_messages, config, prior = await self._build_input(messages, session_id)
-        state = await self.graph.ainvoke({"messages": lc_messages}, config=config)
+        # tool_call_count 每轮显式置 0：它是"本轮"执行数，不能沿用 checkpoint 里的上一轮值。
+        state = await self.graph.ainvoke(
+            {"messages": lc_messages, "tool_call_count": 0}, config=config
+        )
         final_messages = state["messages"]
         # 答案与来源都只从本轮新增的消息里取：
         # sources 不累计历史轮次；answer 也不回退到上一轮（见 _final_answer 说明）
         fresh = final_messages[prior:]
-        return self._result(fresh)
+        return self._result(fresh, state.get("tool_call_count", 0))
 
     @staticmethod
-    def _result(fresh: list) -> dict:
+    def _result(fresh: list, tool_call_count: int | None = None) -> dict:
         """统一收尾口径：answer / sources / retrieved_sources / tool_calls。
 
         两个来源字段是两个不同的问题，必须分开返回（见 _parse_citations 的实测说明）：
@@ -841,6 +887,8 @@ class AgentRuntime:
         `retrieved_sources` 为空，可答案正文里仍写着【来源：员工手册_示例.md】——那是历史轮次
         留下的引用，本轮并没有检索。只有两个列表时，消费方无法区分
         "检索了但没命中"（召回问题）和"根本没检索"（这条引用没有本轮证据）。
+        执行数由 tools_node 显式累计（`tool_call_count`），不再数 ToolMessage 条数：
+        重复调用被跳过、工具名不存在的调用也会生成 ToolMessage，但并没有真的执行。
 
         `unverified_sources`（查无此据的引用）与 `tool_calls` 是同一类"让引用可被质疑"的字段：
         实测模型会写出知识库里不存在的来源名、甚至写出"（知识库检索失败…）"这种**描述了一件
@@ -850,19 +898,24 @@ class AgentRuntime:
         citations = _parse_citations(answer)
         retrieved = _parse_sources(fresh)
         _, unverified = _split_verified_citations(citations, retrieved)
+        if tool_call_count is None:
+            # 兼容直接调用 _result 的单测/脚本：没有图状态可读时退回旧口径。
+            tool_call_count = sum(1 for m in fresh if getattr(m, "type", "") == "tool")
         return {
             "answer": answer,
             "sources": citations,
             "retrieved_sources": retrieved,
             "unverified_sources": unverified,
-            "tool_calls": sum(1 for m in fresh if getattr(m, "type", "") == "tool"),
+            "tool_calls": int(tool_call_count),
         }
 
     async def astream(self, messages: list[dict], session_id: str | None = None):
         """按 super-step 产出 (node, state_update) 增量，供 SSE 逐步下发。"""
         lc_messages, config, prior = await self._build_input(messages, session_id)
         async for update in self.graph.astream(
-            {"messages": lc_messages}, config=config, stream_mode="updates"
+            {"messages": lc_messages, "tool_call_count": 0},
+            config=config,
+            stream_mode="updates",
         ):
             yield update
         # 图跑完后从 checkpoint 取最终状态，避免再跑一次
@@ -870,7 +923,7 @@ class AgentRuntime:
         values = snapshot.values or {}
         final_messages = values.get("messages", [])
         # 与 ainvoke 同口径：答案与来源都只看本轮新增消息
-        yield self._result(final_messages[prior:])
+        yield self._result(final_messages[prior:], values.get("tool_call_count", 0))
 
     async def aclose_thread(self, session_id: str) -> None:
         """删掉某个 session 的 checkpoint 线程（评测/回归专用）。
