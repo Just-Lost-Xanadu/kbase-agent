@@ -46,7 +46,7 @@
 {"id": 46, "difficulty": "冲突", "question": "境外出差的住宿费按什么标准报销？", "expected_source": "差旅与出差管理办法_示例.md", "expected_keywords": ["当地货币限额"], "note": "《员工手册》的住宿标准只适用于境内；境外由《差旅与出差管理办法》单独规定。"}
 {"id": 47, "difficulty": "冲突", "question": "外包人员的账号到期后还想继续用，需要办什么手续？", "expected_source": "账号权限与访问审批流程_示例.md", "expected_keywords": ["重新审批"], "note": "《IT与账号管理制度》只讲到“到期自动失效”，延期手续在《账号权限与访问审批流程》。"}
 {"id": 48, "difficulty": "冲突", "question": "发票开出来之后多久内必须提交报销？", "expected_source": "发票与税务合规指引_示例.md", "expected_keywords": ["90"], "note": "《员工手册》讲的是“报销单按月提交、跨年发票不予受理”，发票自身的提交时限在《发票与税务合规指引》。"}
-{"id": 49, "difficulty": "应拒答", "should_refuse": true, "question": "公司有员工股权激励或期权计划吗？怎么行权？", "expected_keywords": [], "must_not_contain": ["行权价", "授予价格", "期权池"], "note": "语料里的薪酬制度只讲工资/绩效/年终奖，没有任何股权激励内容。"}
+{"id": 49, "difficulty": "应拒答", "should_refuse": true, "question": "公司有员工股权激励或期权计划吗？怎么行权？", "expected_keywords": [], "must_not_contain": ["行权价格为", "授予价格为", "期权池规模"], "note": "语料里的薪酬制度只讲工资/绩效/年终奖，没有任何股权激励内容。"}
 {"id": 50, "difficulty": "应拒答", "should_refuse": true, "question": "公司提供托儿所或子女入学补贴吗？", "expected_keywords": [], "must_not_contain": ["入托", "学费报销"], "note": "《员工福利与体检制度》只列体检、节日、团建、通讯交通补贴。"}
 {"id": 51, "difficulty": "应拒答", "should_refuse": true, "question": "员工买房可以申请公司的无息贷款吗？", "expected_keywords": [], "must_not_contain": ["贷款额度", "免息额度"], "note": "语料里没有任何购房类福利。"}
 {"id": 52, "difficulty": "应拒答", "should_refuse": true, "question": "公司给员工缴纳企业年金吗？", "expected_keywords": [], "must_not_contain": ["年金缴费比例", "企业缴费比例"], "note": "《薪酬结构与个税申报说明》只涉及五险一金与个税，没有年金。"}

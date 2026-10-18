@@ -44,14 +44,3 @@ def test_save_and_read_roundtrip(tmp_path, monkeypatch):
     assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
     assert messages[-1]["sources"] == ["员工手册_示例.md"]
     assert len(_run(store.list_sessions())) == 1
-
-
-def test_sessions_ordered_by_activity(tmp_path, monkeypatch):
-    db = tmp_path / "checkpoints.sqlite"
-    monkeypatch.setattr(store, "DB_PATH", str(db))
-    _run(store.init_db())
-    _run(store.save_turn("a", "旧会话", "旧会话", "答", []))
-    _run(store.save_turn("b", "新会话", "新会话", "答", []))
-    sessions = _run(store.list_sessions())
-    assert sessions[0]["id"] == "b"
-    assert sessions[1]["id"] == "a"

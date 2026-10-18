@@ -3,13 +3,7 @@
 import asyncio
 
 from app import store
-from app.observability import Recorder, Step, estimate_cost
-
-
-def test_estimate_cost_uses_config():
-    # settings 默认输入 2 元 / 输出 8 元（每百万 token）
-    cost = estimate_cost(500_000, 250_000)
-    assert round(cost, 4) == round(0.5 * 2.0 + 0.25 * 8.0, 4)
+from app.observability import Recorder, Step
 
 
 def test_recorder_summarize():

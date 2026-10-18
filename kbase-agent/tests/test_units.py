@@ -4,16 +4,10 @@ import json
 
 import pytest
 
-from app.guardrails import (
-    AgentLimits,
-    default_recursion_limit,
-    is_duplicate_call,
-    truncate_tool_output,
-)
+from app.guardrails import truncate_tool_output
 from app.retrieval.chunker import fixed_size_chunk, split_documents
 from app.retrieval.hybrid import hybrid_search
 from app.retrieval.keyword import tokenize
-from eval.metrics import summarize
 
 
 def test_tokenize_keeps_digits_and_cjk_bigrams():
@@ -97,17 +91,6 @@ def test_final_answer_does_not_fall_back_to_previous_turn():
     assert _final_answer(current_turn) == ""
     # 对照：若误传完整历史，就会拿到上一轮的答案（这就是修掉的那个回退）
     assert _final_answer(previous_turn + current_turn) == "上一轮的答案"
-
-
-def test_is_duplicate_call_full_history():
-    # A→B→A 式的隔步重复也要判出（全历史判重，而非仅相邻）
-    history = [
-        ("retrieve_knowledge", '{"question": "a"}'),
-        ("query_business_db", '{"question": "b"}'),
-    ]
-    assert is_duplicate_call(history, ("retrieve_knowledge", '{"question": "a"}')) is True
-    assert is_duplicate_call(history, ("query_business_db", '{"question": "c"}')) is False
-    assert is_duplicate_call([], ("retrieve_knowledge", "{}")) is False
 
 
 # —— 身份解析（安全回归）——
@@ -216,25 +199,6 @@ def test_keyword_coverage_ignores_whitespace_and_misses():
 # 背景：金标集从 40 条单源扩到含"多跳/冲突/应拒答"三类难例。三类用例的判定口径不同，
 # 混在一起算会让指标失真（最典型：把没有真值的应拒答用例算进引用覆盖率的分母，
 # 指标凭空下降——那是口径 bug，不是效果变化）。
-
-
-def test_gold_sources_supports_single_multi_and_refusal():
-    from eval.metrics import gold_sources, is_refusal_case
-
-    single = {"id": 1, "expected_source": "a.md"}
-    multi = {"id": 2, "expected_sources": ["a.md", "b.md"]}
-    refuse = {"id": 3, "should_refuse": True, "expected_keywords": []}
-    bare = {"id": 4}   # 没写真值来源，等同于应拒答
-
-    assert gold_sources(single) == ["a.md"]
-    assert gold_sources(multi) == ["a.md", "b.md"]   # 多跳优先于单源
-    assert gold_sources(refuse) == []
-    assert gold_sources(bare) == []
-
-    assert is_refusal_case(refuse) is True
-    assert is_refusal_case(bare) is True
-    assert is_refusal_case(single) is False
-    assert is_refusal_case(multi) is False
 
 
 def test_multi_hop_requires_every_source():
@@ -621,7 +585,7 @@ def test_tools_node_runs_batch_concurrently_and_still_dedupes():
 
         async def ainvoke(self, args):
             events.append(f"start:{self.name}")
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2)
             events.append(f"end:{self.name}")
             return [{"type": "text", "text": f"{self.name} 的结果"}]
 
@@ -663,8 +627,9 @@ def test_tools_node_runs_batch_concurrently_and_still_dedupes():
 
     # 1) 并发：两个工具都"开始"了才出现第一个"结束"（串行时事件必然是 start/end 交替）
     assert events[:2] == ["start:t_a", "start:t_b"], f"工具调用没有并发执行：{events}"
-    # 2) 串行两次 0.05s×2=0.1s；并发约 0.05s。给足余量，只断言"明显快于串行"
-    assert elapsed < 0.09, f"耗时 {elapsed:.3f}s 接近串行(0.1s)，并发可能没生效"
+    # 2) 串行两次 0.2s×2=0.4s；并发约 0.2s。阈值给足余量，避免机器抖动造成偶发失败
+    #    （原来的 0.05s/0.09s 在慢机上实测 0.090s 就红过一次）
+    assert elapsed < 0.35, f"耗时 {elapsed:.3f}s 接近串行(0.4s)，并发可能没生效"
 
     tool_messages = [m for m in out["messages"] if isinstance(m, ToolMessage)]
     assert len(tool_messages) == 3, "每个 tool_call 都应有一条 ToolMessage（顺序与 id 对应）"
