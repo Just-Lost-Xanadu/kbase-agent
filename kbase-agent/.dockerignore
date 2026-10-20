@@ -1,0 +1,26 @@
+# 只把运行期需要的东西送进构建上下文；索引/模型/会话/密钥一律不进镜像。
+.git
+.gitignore
+.venv
+venv
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+tests/
+docs/
+eval/
+docker-data/
+data/*
+!data/docs/
+!data/business/
+**/data/chroma/
+**/data/fastembed_cache/
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+*.log

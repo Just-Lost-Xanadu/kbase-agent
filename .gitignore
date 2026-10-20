@@ -39,5 +39,8 @@ kbase-agent/docs/eval-reports/*.json
 .vscode/
 .DS_Store
 
+# Docker 运行期数据卷（索引/模型/会话），可重建，不入库
+kbase-agent/docker-data/
+
 # 本地同步/网盘工具的临时标记文件（不属于项目内容）
 *.baiduyun.uploading.cfg

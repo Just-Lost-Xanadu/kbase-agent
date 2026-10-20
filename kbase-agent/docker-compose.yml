@@ -1,0 +1,34 @@
+services:
+  kbase-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kbase-agent:local
+    container_name: kbase-agent
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # 运行期数据都放卷里；data/docs 与 data/business 已打进镜像。
+      CHROMA_PATH: /app/state/chroma
+      CHECKPOINT_DB: /app/state/checkpoints.sqlite
+      FASTEMBED_CACHE_DIR: /app/state/fastembed_cache
+      # 最小鉴权。没在 .env 里改就走这里的演示默认值——上线前必须换掉。
+      APP_AUTH_USER: ${APP_AUTH_USER:-demo}
+      APP_AUTH_PASS: ${APP_AUTH_PASS:-change-me}
+      TZ: Asia/Shanghai
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docker-data:/app/state
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 180s

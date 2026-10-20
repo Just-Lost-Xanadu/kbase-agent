@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
 from app.api.chat import router as chat_router
+from app.auth import BasicAuthMiddleware
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -26,10 +27,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="kbase-agent", version="0.1.0", lifespan=lifespan)
 
+# 最小鉴权：设了 APP_AUTH_USER/APP_AUTH_PASS 就全站启用（/api/health 除外）。
+# 不设则保持原来的本地免鉴权行为，避免影响现有测试与本地开发。
+app.add_middleware(BasicAuthMiddleware)
+
 # 刻意不加 CORSMiddleware：演示前端由本服务在 / 同源提供，同源请求不需要 CORS；
-# 而本服务**没有任何鉴权**，一旦开 `allow_origins=["*"]`，任意网站都能从用户浏览器里
-# 跨域读走 /api/sessions/{id}/messages 与 /api/runs（历史对话与运行 trace）。
-# 真要开放给别的源，应该同时补鉴权，并把 allow_origins 收敛到具体域名。
+# 服务现在有 HTTP Basic 鉴权，但**没有跨源授权模型**：一旦开 `allow_origins=["*"]`，
+# 别的站点仍可能借用户浏览器跨域读走 /api/sessions/{id}/messages 与 /api/runs。
+# 真要开放给别的源，应该同时收紧 Origin、上 TLS，并保留鉴权。
 app.include_router(chat_router, prefix="/api")
 
 

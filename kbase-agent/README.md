@@ -16,6 +16,7 @@
 ```
 app/
   config.py            # 环境配置（DeepSeek 主，OpenAI 兼容层模型无关）
+  auth.py              # 最小鉴权：HTTP Basic（只设一个变量会拒绝启动）
   main.py              # FastAPI 入口（懒加载资源）
   services.py          # 检索管道 + Agent runtime 懒加载与进程内缓存
   store.py             # 会话/消息记录 + run_traces 观测表（读历史/观测接口数据源）
@@ -45,6 +46,9 @@ static/                # 单文件演示前端（index.html，无构建，打开
 tests/                 # smoke + 纯逻辑单测（49 项，`pytest` 实测 49 passed）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
+Dockerfile             # 运行镜像；首次启动自动建索引，索引/模型/会话放 /app/state 卷
+docker-compose.yml     # 一条命令起服务 + healthcheck + 最小鉴权
+docker/entrypoint.sh   # 容器入口：缺索引时先建索引，再起 uvicorn
 docs/
   eval-reports/        # 评测报告（baseline.json 基线 + fullrun-verify.json 复核，可被 --compare 引用）
   screenshots/         # 演示截图
@@ -73,6 +77,22 @@ uvicorn app.main:app --reload   # http://127.0.0.1:8000/docs
 
 > **依赖为什么要锁**：上游 `langgraph` / `langchain-core` / `chromadb` 大版本变动快，本仓库实测可跑的
 > 组合是 **langgraph 1.2.x + langchain-core 1.6.x + chromadb 1.5.x**（见 `requirements.lock` 头部）。
+
+### Docker（一条命令跑起来，自带最小鉴权）
+
+```bash
+copy .env.example .env          # 至少填 DEEPSEEK_API_KEY
+docker compose up --build -d    # 首次会建索引并下载 embedding 模型，约 1~3 分钟
+# 浏览器打开 http://127.0.0.1:8000，会弹出 HTTP Basic 登录框
+```
+
+默认账号 `demo / change-me`，**部署前必须改**（在 `.env` 里设 `APP_AUTH_USER` / `APP_AUTH_PASS`）。
+索引、模型缓存、会话 checkpoint 都在 `./docker-data` 卷里，容器重建不会丢；`/api/health` 不鉴权，
+供 healthcheck 使用。
+
+> 边界：Basic Auth 只适合演示/内网，裸 HTTP 下请求头可解码。公网部署请在反向代理上加 TLS，
+> 或换成 OAuth/JWT；本项目没有做多用户、角色和审计。
+> Linux 原生部署时 `requirements.lock` 里的 `pywin32` / `win32_setctime` 会被 Dockerfile 显式过滤。
 > 只跑 `pip install -e .` 可能装到不兼容的新版本——先装 lock、再装本包，是最稳的顺序。
 
 ## 使用
@@ -432,30 +452,30 @@ flowchart TD
 - **效果与成本**：60 条金标两层 Harness（含多跳/冲突/应拒答三类难例；`--tag` 落报告、`--compare` 回归 diff、`--reanalyze` 离线重算指标）；最近一轮基线（`corpus-v2`，2026-09-21，39 篇语料）实测：检索层 `topk_hit_rate` 0.9821、端到端引用覆盖 55/56、应拒答 4/4、延迟 p50 ≈ 6.6s / p95 ≈ 7.9s、单条成本 ≈ ¥0.0074。`/api/runs` 有节点级 trace 可逐条归因，`steps` 里现在带 `tool_calls`/`tool_args`（能直接看出这一步调了哪把工具、传了什么参数）。
   常驻 MCP 会话上线后（本机实测，同一份语料、同样问法）：**单次 `tools` 步由约 3.9s 降到 13~16ms**，端到端 **p50 由约 6.6s 降到约 2s**（同一批问法改动前 4413~6188ms → 改动后 1790~2421ms；首轮另含约 13s 的索引/嵌入冷加载，那是进程级一次性成本）。**剩下的延迟大头已经变成 LLM 往返**（agent 步 480~1660ms × 2~3 次），不再是工具调用——这是"打对了地方"的又一个可验证形状。
 
-## 容器化部署设计（**未实施**，方案已想清）
+## 容器化部署（已实施）
 
-> 说明：本仓库**目前没有 Dockerfile**，下面是把容器化想清楚后的设计，不是已完成能力。
-> 先写设计是为了把判断点想明确（尤其第 2、3 条）。真正实施时按此落地并补一份实测记录。
+`Dockerfile` + `docker-compose.yml` 提供**单副本、带最小鉴权**的运行方式：
 
-1. **基础镜像与依赖**：`python:3.12-slim` + `pip install -r requirements.lock`（本仓库已锁版本，正好是这里的输入）→ 再 `pip install -e .`。
-   `onnxruntime`（FastEmbed 底层）在 slim 上需要补系统库（如 `libgomp1`）；这是个真实的踩坑点，装完要验证 `import onnxruntime`。
-2. **模型与索引放哪（唯一真正需要判断的点）**——两者策略相反：
-   - **embedding 模型**：构建期预热进镜像（`RUN python -c "from fastembed import TextEmbedding; ..."`）→ 启动快、可离线，代价是镜像大几百 MB；
-     若追求小镜像则改成挂缓存卷，但首次启动必须联网下载。
-   - **索引与会话数据必须挂卷**：`data/chroma/`（索引）、`data/checkpoints.sqlite`（会话）、`data/business/`（业务数据）
-     三者都是"运行期产生、不能随镜像重建清掉"的状态。
-3. **有状态 → 副本数受限**：checkpoint 是 SQLite 文件，所以**单副本 + 卷**即可；
-   要横向扩必须先换 Postgres checkpointer（见本文「已知取舍」），否则多副本各写各的会话。
-4. **健康检查**：`HEALTHCHECK` 直接打 `/api/health`——该探针刻意做成**不依赖 API key 与索引**，
-   这正是 liveness / readiness 该有的语义（容器起来但引擎未就绪时可被区分）。
-5. **密钥与配置**：key 由 `-e` / secrets 注入，**绝不写进镜像层**；`.env` 必须进 `.dockerignore`。
+- **基础镜像与依赖**：`python:3.12-slim` + `requirements.lock`；lock 里的 `pywin32` / `win32_setctime`
+  是 Windows-only，构建时显式过滤，其余版本仍锁定。
+- **状态放卷**：embedding 模型、Chroma 索引、SQLite checkpoint 都映射到 `/app/state`（宿主机 `./docker-data`）。
+  首次启动缺索引时由 `docker/entrypoint.sh` 自动建索引并下载模型；之后重启是秒级。
+- **有状态 → 单副本**：checkpoint 仍是 SQLite 文件，所以只支持单副本 + 卷；横向扩要先把 checkpointer
+  换成 Postgres，否则多副本各写各的会话。
+- **健康检查**：打 `/api/health`，该探针不依赖 API key 与索引，适合做 liveness。
+- **最小鉴权**：`app/auth.py` 用纯 ASGI 实现 HTTP Basic，`/api/health` 公开、其余路径要认证；
+  `APP_AUTH_USER` / `APP_AUTH_PASS` 只设一个会拒绝启动。**这只是演示/内网级**：
+  没有用户表、角色、审计、限流；裸 HTTP 下 Basic 头可解码，公网必须加 TLS。
+- **密钥**：`.env` 不进镜像（`.dockerignore` 已排除），运行时由 compose 注入。
 
-**同时要清楚容器化解决不了什么**：鉴权、限流、多副本调度、结构化日志与指标导出、CI/CD 与回滚——
-这些属于"工程化部署"的其余环节，本仓库均未做（同样不宣称）。容器化只拿到"打包与环境可复现"这一格。
+**容器化解决不了什么**：多租户/RBAC、限流、多副本调度、结构化日志与指标导出、CI/CD 与回滚——
+这些仍未做，不在 README 里宣称。
 
 ## 已知取舍 / 改进方向
 
-- **刻意不加 CORS 中间件**：演示前端由本服务在 `/` 同源提供，同源请求不需要 CORS；而本服务**没有任何鉴权**，一旦开 `allow_origins=["*"]`，任意网站都能从用户浏览器跨域读走 `/api/sessions/{id}/messages` 与 `/api/runs`（历史对话与运行 trace）。要开放给别的源，必须同时补鉴权并把来源收敛到具体域名。
+- **刻意不加 CORS 中间件**：演示前端由本服务在 `/` 同源提供，同源请求不需要 CORS；
+  服务现在有 HTTP Basic 鉴权（`/api/health` 除外），但**没有跨源授权模型**——
+  一旦开 `allow_origins=["*"]`，仍需同时补鉴权、收紧来源并上 TLS，否则历史对话与运行 trace 会暴露。
 - 开发用 Chroma，生产切 Milvus / Elasticsearch（换 collection 层即可）。
 - 默认 FastEmbed（ONNX，零 torch）；要更准可 `EMBED_BACKEND=flagembedding` 上 bge-m3，或 `RERANK_ENABLED=true` 加重排——均需 `pip install -e ".[embed]"`。**换 embedding 后删除 `data/chroma/` 重建索引**。
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
@@ -470,7 +490,9 @@ flowchart TD
   （为什么必须先清空：`chunk_id = source#method#idx` 带 method 但**不带 chunk_size/overlap**，换切分法时旧 id 覆盖不到会永久残留 → 向量路召回旧切片、而 BM25 的 sidecar 只有新切片，两路口径不一致。这是实测复现过的缺陷，已有回归测试锁住“先 reset 再 add”的顺序。换 embedding 模型仍需重建，理由同前。）
   另：**embedding 模型在 reset 之前就先加载**。模型加载原本发生在 `add()` 里、也就是 `reset()` **之后**，于是加载失败（离线 / 代理没开 / 模型缓存被清）时向量库已经被清空、而 sidecar 还在 → `is_indexed()` 为假而自动重建又只认“读不到 sidecar”，服务对每个请求都报“索引不一致：分块清单存在但向量库为空”且不会自愈（已实测复现）。前置之后失败发生在任何破坏之前，旧索引原封不动、恢复网络重跑即可。
 - 会话 checkpoint 落 SQLite（`data/checkpoints.sqlite`，WAL）：Agent 状态与消息记录分离（checkpoint 表 vs conversations/messages + run_traces）；重启不丢、同一 session 续聊。多进程/高并发生产换 Postgres 并加按用户区分与消息分库。成本估算为估算值（单价见 `.env` 的 `LLM_PRICE_*`）。
-- **个人数据工具没有鉴权（安全边界，如实说明）**：`query_business_db` 的身份来自"问题文本里出现的姓名"，而不是会话绑定的用户——任何人都可以问别人（例如"李四还剩几天年假"）而拿到其年假余额与报销金额。已修的是**静默错人**：姓名缺失时不再默认返回第一条记录（旧实现会拿张三的数据当提问人的），姓名有歧义时直接拒绝。
+- **个人数据工具的“身份”仍没有鉴权（安全边界，如实说明）**：服务层现在有 HTTP Basic 共享账号，
+  但 `query_business_db` 的身份仍来自"问题文本里出现的姓名"，而不是会话绑定的用户——登录后仍可以问别人
+  （例如"李四还剩几天年假"）而拿到其年假余额与报销金额。已修的是**静默错人**：姓名缺失时不再默认返回第一条记录（旧实现会拿张三的数据当提问人的），姓名有歧义时直接拒绝。
   配合 `SYSTEM_PROMPT` 第 5 条，未指名员工时仍会**先 `retrieve_knowledge` 取制度规则并据此说明、再请用户补充姓名**——实测问「我今年还剩几天年假？」，回答会先给出年假与结转规则（带【来源】引用），再说明"需要你的姓名才能查个人剩余天数"，**既没有丢掉该答的制度部分，也不会静默用他人数据**。
   **同名去重与"子串匹配"的边界（如实说明）**：`matched_names` 现在按姓名去重，所以库里同一姓名有两条记录时不会再被误判成"问题里有多个姓名"而拒绝（重复行属于数据问题，交给数据侧修）；但身份匹配仍是**子串匹配**（`r["name"] in question`），因此存在误伤——问题里出现"张伟明"会命中员工"张伟"。生产化方向是实体抽取 + 唯一 ID，而不是子串包含。
   生产化方向：由会话层注入 `user_id` 并做行级过滤，而不是相信模型传进来的文本。**不对外宣称具备权限控制。**

@@ -49,9 +49,20 @@ python -m venv .venv
 .venv\Scripts\activate                     # Windows；macOS/Linux 用 source .venv/bin/activate
 pip install -r requirements.lock           # 复现已验证的依赖组合（Python 3.12）
 pip install -e ".[dev]"
-copy .env.example .env                     # 填入 DEEPSEEK_API_KEY
+copy .env.example .env                     # 填入 DEEPSEEK_API_KEY，并设置 APP_AUTH_USER/PASS
 uvicorn app.main:app --reload              # http://127.0.0.1:8000
 ```
+
+也可以直接用 Docker（首次启动会自动建索引并下载模型）：
+
+```bash
+cd kbase-agent
+copy .env.example .env                     # 至少填 DEEPSEEK_API_KEY，并改掉默认账号密码
+docker compose up --build -d               # http://127.0.0.1:8000（HTTP Basic 登录）
+```
+
+最小鉴权由 `APP_AUTH_USER` / `APP_AUTH_PASS` 控制：两个都设才启用，只设一个会拒绝启动；
+`/api/health` 始终公开。Basic Auth 只适合演示/内网，公网部署必须加 TLS。
 
 Windows 上也可直接双击 `kbase-agent/start.bat`（一键建 venv → 装依赖 → 建索引 → 起服务）。
 
