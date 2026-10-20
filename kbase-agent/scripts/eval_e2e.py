@@ -547,6 +547,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.limit < 0:
+        # 负数会被 `if limit and limit > 0` 静默当成"全量"，冒烟测试实际上跑了 60 条。
+        parser.error(f"--limit 必须 >= 0（0 表示全量），收到 {args.limit}")
     if args.tag and args.limit:
         parser.error("--tag 与 --limit 同时给出不会落报告（--limit 是冒烟模式）；请去掉其中一个")
     if args.compare and not args.tag:

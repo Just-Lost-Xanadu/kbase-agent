@@ -268,15 +268,40 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _positive_ints(raw: str, option: str) -> tuple[int, ...]:
+    """解析逗号分隔的正整数；空串、0、负数都在入口拒绝。
+
+    负数不是"全都要"：`retrieve` 里的 `[:top_k]` 会变成"去掉最后几条"，
+    在 56 条有真值的用例上能刷出 100% 命中率——这不是评测，是假数据。
+    """
+    values: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError as exc:
+            raise SystemExit(f"{option} 需要逗号分隔的整数，收到 {part!r}") from exc
+        if value <= 0:
+            raise SystemExit(f"{option} 的每一项都必须 > 0，收到 {value}")
+        values.append(value)
+    if not values:
+        raise SystemExit(f"{option} 不能为空")
+    return tuple(values)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.top_k <= 0:
+        parser.error(f"--top-k 必须 > 0，收到 {args.top_k}")
     if args.sweep_k:
-        ks = tuple(int(x) for x in args.ks.split(",") if x.strip())
+        ks = _positive_ints(args.ks, "--ks")
         sweep(ks=ks)
         return 0
     if args.sweep_chunk_size:
-        sizes = tuple(int(x) for x in args.sizes.split(",") if x.strip())
+        sizes = _positive_ints(args.sizes, "--sizes")
         sweep_chunk_size(sizes=sizes, top_k=args.top_k)
         return 0
     run(route=args.route, top_k=args.top_k, json_path=args.json_path)

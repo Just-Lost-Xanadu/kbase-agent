@@ -180,6 +180,11 @@ class RetrievalPipeline:
             "仅向量 0.875 / 仅 BM25 0.964"的口径。
         """
         self.ensure_ready()
+        # top_k 必须是正整数。负数不是"不限制"：`merged[:top_k]` 会变成
+        # "去掉最后 |top_k| 条"，在 60 条金标上能刷出 100% 命中率的假结果
+        # （实测 `eval.py --top-k -1` 三条路都是 1.0000）；0 则永远命中 0 条。
+        if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k <= 0:
+            raise ValueError(f"top_k 必须是正整数，收到 {top_k!r}")
         if route == "vector":
             return self.vector_store.search(query, top_k=top_k)
         if route == "bm25":

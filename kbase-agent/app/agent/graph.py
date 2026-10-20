@@ -503,18 +503,19 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
     return any(
         marker in text
         for marker in (
-            "connection", "timeout", "timed out", "rate limit", "429",
-            "502", "503", "504", "overloaded", "temporarily unavailable",
+            "connection", "connect", "timeout", "timed out", "rate limit",
+            "429", "500", "502", "503", "504", "overloaded",
+            "temporarily unavailable", "econnreset", "econnrefused",
         )
     )
 
 
-async def _ainvoke_with_retry(llm, messages, attempts: int = 2):
-    """LLM 调用：瞬时错误重试一次，其余错误保持原样上抛。
+async def _ainvoke_with_retry(llm, messages, attempts: int = 3):
+    """LLM 调用：瞬时错误最多重试两次，其余错误保持原样上抛。
 
     背景：端到端评测里遇到过 `OpenAIConnectionError: Connection error.`——
     一次网络抖动就会让一条用例变成 FAIL，而它既不是模型答错、也不是代码错。
-    重试只做一次，避免把限流/故障放大成更长的等待。
+    只重试两次（0.5s / 1.0s 退避），避免把长时间故障放大成更长的等待。
     """
     last: BaseException | None = None
     for attempt in range(attempts):
@@ -524,7 +525,7 @@ async def _ainvoke_with_retry(llm, messages, attempts: int = 2):
             last = exc
             if attempt + 1 >= attempts or not _is_transient_llm_error(exc):
                 raise
-            await asyncio.sleep(0.5 * (attempt + 1))
+            await asyncio.sleep(0.5 * (2**attempt))
     assert last is not None
     raise last
 
