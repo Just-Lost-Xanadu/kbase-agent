@@ -1,0 +1,6 @@
+# 容器里的入口脚本必须是 LF；Windows 上 core.autocrlf=true 会把它转成 CRLF，
+# 导致 /bin/sh 报 "no such file or directory"（实际是 \r 在解释器路径里）。
+*.sh text eol=lf
+kbase-agent/docker/*.sh text eol=lf
+kbase-agent/Dockerfile text eol=lf
+kbase-agent/docker-compose.yml text eol=lf
