@@ -466,6 +466,9 @@ flowchart TD
 - **最小鉴权**：`app/auth.py` 用纯 ASGI 实现 HTTP Basic，`/api/health` 公开、其余路径要认证；
   `APP_AUTH_USER` / `APP_AUTH_PASS` 只设一个会拒绝启动。**这只是演示/内网级**：
   没有用户表、角色、审计、限流；裸 HTTP 下 Basic 头可解码，公网必须加 TLS。
+- **MCP 子进程环境**：MCP SDK 的 stdio 客户端默认只继承 `PATH/HOME/SHELL` 等少量变量，
+  **不会**继承 `CHROMA_PATH` 等自定义变量；因此 `app/agent/graph.py` 显式传 `env=os.environ`。
+  不传时本地有 `.env` 兜底看不出来，容器里会表现为“父进程检索正常、工具却永远说索引不存在”。
 - **密钥**：`.env` 不进镜像（`.dockerignore` 已排除），运行时由 compose 注入。
 
 **容器化解决不了什么**：多租户/RBAC、限流、多副本调度、结构化日志与指标导出、CI/CD 与回滚——

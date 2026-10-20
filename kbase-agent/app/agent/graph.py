@@ -9,6 +9,7 @@
 import asyncio
 import contextlib
 import json
+import os
 import re
 import sys
 import uuid
@@ -1001,6 +1002,12 @@ async def create_runtime() -> AgentRuntime:
                 "args": ["-m", "app.mcp.servers"],
                 "cwd": str(ROOT),
                 "transport": "stdio",
+                # 必须显式传 env：MCP SDK 的 stdio_client 默认只继承
+                # PATH/HOME/SHELL 等少量变量，**不会**继承 CHROMA_PATH /
+                # CHECKPOINT_DB / FASTEMBED_CACHE_DIR。本地有 .env 兜底时看不出来；
+                # 容器里 .env 不进镜像，子进程就会退默认路径 data/chroma 并报
+                # "索引不存在"，而父进程的检索是好的——表现为"工具永远说没索引"。
+                "env": dict(os.environ),
             }
         }
     )
