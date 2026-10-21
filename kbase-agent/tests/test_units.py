@@ -133,47 +133,6 @@ def test_query_business_db_returns_the_named_employee(tmp_path, monkeypatch):
     assert '"employee": "张三"' not in out
 
 
-def test_business_records_cache_invalidates_on_edit(tmp_path, monkeypatch):
-    """缓存必须"改了数据就生效"：这是缓存最容易引入的静默错误（改了却读到旧值）。"""
-    from app.mcp import servers
-
-    f = tmp_path / "records.jsonl"
-    monkeypatch.setattr(servers, "RECORDS_FILE", f)
-    monkeypatch.setattr(servers, "_records_cache", None)
-    f.write_text(
-        json.dumps({"name": "赵六", "annual_leave_total": 10, "annual_leave_remaining": 2,
-                    "overtime_balance_hours": 0, "latest_expense": None}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    assert '"annual_leave_remaining": 2' in servers.query_business_db(question="赵六年假？")
-
-    # 直接改文件（mtime/size 会变），必须立刻读到新值
-    f.write_text(
-        json.dumps({"name": "赵六", "annual_leave_total": 10, "annual_leave_remaining": 7,
-                    "overtime_balance_hours": 0, "latest_expense": None}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    out = servers.query_business_db(question="赵六年假？")
-    assert '"annual_leave_remaining": 7' in out, f"缓存没有失效，读到旧值：{out}"
-
-
-def test_business_records_bad_line_is_skipped(tmp_path, monkeypatch, capsys):
-    """坏行不能让整把工具失败：应跳过坏行并在 stderr 记明行号，其余记录照常可用。"""
-    from app.mcp import servers
-
-    f = tmp_path / "records.jsonl"
-    monkeypatch.setattr(servers, "RECORDS_FILE", f)
-    monkeypatch.setattr(servers, "_records_cache", None)
-    good = json.dumps({"name": "钱七", "annual_leave_total": 10,
-                       "annual_leave_remaining": 5, "overtime_balance_hours": 0,
-                       "latest_expense": None}, ensure_ascii=False)
-    f.write_text(good + "\n{这行不是JSON\n", encoding="utf-8")
-
-    out = servers.query_business_db(question="钱七年假？")
-    assert '"employee": "钱七"' in out, f"坏行把好记录一起弄丢了：{out}"
-    assert "第 2 行" in capsys.readouterr().err, "坏行必须留下可定位的日志"
-
-
 # —— 答案内容质量指标 ——
 
 

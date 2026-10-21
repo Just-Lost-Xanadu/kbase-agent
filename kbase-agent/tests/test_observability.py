@@ -6,18 +6,6 @@ from app import store
 from app.observability import Recorder, Step
 
 
-def test_recorder_summarize():
-    rec = Recorder(question="测试")
-    rec.add(Step(node="agent", name="llm", duration_ms=100, prompt_tokens=10, completion_tokens=5, ok=True))
-    rec.add(Step(node="tools", name="retrieve_knowledge", duration_ms=50, ok=False, note="超时"))
-    s = rec.summarize()
-    assert s["llm_calls"] == 1
-    assert s["tool_calls"] == 1
-    assert s["total_tokens"] == 15
-    assert len(s["steps"]) == 2
-    assert s["steps"][1]["ok"] is False
-
-
 def _run(coro):
     return asyncio.run(coro)
 

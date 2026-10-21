@@ -1,6 +1,6 @@
 # kbase-agent
 
-> **测试口径（2026-10-21 再精简后）**：`pytest -q` → kbase-agent **44 passed**、ecommerce-dw **32 passed**、mcp-tools **30 passed**，合计 **106**。README 内的历史段落保留更早版本的 77/51/38 与 60/40/30。
+> **测试口径（2026-10-21 再精简后）**：`pytest -q` → kbase-agent **40 passed**、ecommerce-dw **32 passed**、mcp-tools **30 passed**，合计 **102**。README 内的历史段落保留更早版本的 77/51/38、60/40/30、49/36/30。
 
 **企业知识库 + 工具调用 Agent（单 Agent）**：基于 LangGraph 的 ReAct 式工具循环，RAG 检索与业务工具经 **MCP 协议真接入**（stdio）；配**两层评测 Harness**（60 条金标：检索层 + 端到端回归，含多跳/冲突/应拒答三类难例）、SQLite 会话持久化、trace/成本可观测与护栏。
 
@@ -43,7 +43,7 @@ app/
 eval/                  # 60 条评测集（含多跳/冲突/应拒答）+ 指标（跑分脚本在 scripts/eval.py、scripts/eval_e2e.py）
 scripts/               # index_docs.py / eval.py / eval_e2e.py / demo_agent.py
 static/                # 单文件演示前端（index.html，无构建，打开即聊）
-tests/                 # smoke + 纯逻辑单测（44 项，`pytest` 实测 44 passed）
+tests/                 # smoke + 纯逻辑单测（40 项，`pytest` 实测 40 passed）
 start.bat / start.ps1  # Windows 一键启动（建 venv → 装依赖 → 建索引 → 起服务）
 requirements.lock      # 已验证可跑的依赖组合（langgraph 1.2.x / langchain-core 1.6.x，Python 3.12）
 Dockerfile             # 运行镜像；首次启动自动建索引，索引/模型/会话放 /app/state 卷

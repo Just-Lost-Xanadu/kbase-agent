@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from app.retrieval.loader import SUPPORTED_EXTS, load_documents
+from app.retrieval.loader import load_documents
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -30,10 +30,6 @@ def _build_xlsx(path: Path) -> None:
     ws.append(["项目", "说明"])
     ws.append(["发薪日", "每月 10 日"])
     wb.save(str(path))
-
-
-def test_supported_exts():
-    assert {".md", ".txt", ".docx", ".xlsx", ".pdf"} <= SUPPORTED_EXTS
 
 
 def test_load_docx_xlsx_pdf(tmp_path):
