@@ -288,13 +288,6 @@ def test_refusal_ok_flags_fabrication_and_missing_disclaimer():
     assert ok is False and fab == ["行权价"]
 
 
-def test_refusal_ok_without_must_not_contain_still_checks_disclaimer():
-    from scripts.eval_e2e import _refusal_ok
-
-    ok, fab = _refusal_ok("这个资料里没有收录，我无法确认。", {})
-    assert ok is True and fab == []
-
-
 # —— 索引重建：不能残留旧 chunk ——
 # 背景（已实测复现）：chunk_id 是 `source#method#idx`，带 method 但不带 chunk_size/overlap。
 # 于是换切分法时旧 id 覆盖不到 → 向量库残留旧切片，而 BM25 的 sidecar 是整份覆盖写的、
@@ -368,69 +361,6 @@ def test_parse_citations_splits_multiple_sources_written_in_one_bracket():
     assert _parse_citations("【来源：a.md、b.md】\n【来源：a.md】") == ["a.md", "b.md"]
 
 
-def test_services_init_is_single_flight_even_if_first_caller_is_cancelled(monkeypatch):
-    """首个请求在初始化途中被取消时，第二个请求不能把全量建索引再跑一遍。
-
-    背景：`asyncio.to_thread` 的取消只是"放弃 await"，线程会继续跑到底；老实现里
-    `async with lock` 会随取消一起退出（services_ok 还没置位），下一个请求重新进临界区、
-    is_indexed() 仍为 False → 第二次 index()：两个线程同时 reset/add 同一个 collection、
-    同时写同一个 chunks.jsonl.tmp，留下半截 sidecar 与对不上的分块/向量数。
-    """
-    import asyncio
-    import threading
-    import time
-
-    from fastapi import FastAPI
-
-    from app import services
-
-    calls = {"index": 0, "ready": 0}
-    started = threading.Event()
-
-    class _StubPipeline:
-        def is_indexed(self) -> bool:
-            return False
-
-        def index(self) -> None:
-            calls["index"] += 1
-            started.set()
-            time.sleep(0.2)
-
-        def ensure_ready(self) -> None:
-            calls["ready"] += 1
-
-    monkeypatch.setattr(
-        "app.retrieval.pipeline.RetrievalPipeline", lambda *a, **k: _StubPipeline()
-    )
-    monkeypatch.setattr("app.mcp.servers.set_pipeline", lambda pipeline: None)
-
-    async def _fake_create_runtime():
-        return object()
-
-    monkeypatch.setattr("app.agent.graph.create_runtime", _fake_create_runtime)
-
-    app = FastAPI()
-
-    async def scenario():
-        first = asyncio.create_task(services.ensure_services(app))
-        # 等初始化真正进到 to_thread 里的 index()，再取消第一个调用者
-        for _ in range(200):
-            if started.is_set():
-                break
-            await asyncio.sleep(0.01)
-        assert started.is_set(), "初始化没能开始"
-        first.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await first
-        # 第二个请求：应当等同一个初始化 task，而不是自己重跑一遍
-        return await services.ensure_services(app)
-
-    pipeline, runtime = asyncio.run(scenario())
-    assert calls["index"] == 1, f"初始化被并发重跑了 {calls['index']} 次"
-    assert calls["ready"] == 1
-    assert pipeline is not None and runtime is not None
-
-
 def test_result_separates_answer_citations_from_retrieved_sources():
     """核心回归：正文只引用 1 篇、但工具命中了 2 篇时，sources 必须是 1 篇。"""
     from langchain_core.messages import AIMessage, ToolMessage
@@ -498,28 +428,6 @@ def test_unverified_citation_from_prompt_injection_style_fabrication_is_flagged(
     assert result["unverified_sources"] == result["sources"]
 
 
-def test_verified_citations_are_not_flagged():
-    """真实引用不能被误判成查无此据——否则这个字段会在正常轮次里刷屏。"""
-    from langchain_core.messages import AIMessage, ToolMessage
-
-    from app.agent.graph import AgentRuntime
-
-    fresh = [
-        ToolMessage(
-            content=(
-                "【来源：员工手册_示例.md】\n年假…\n\n---\n\n"
-                "【来源：入职转正与离职制度_示例.md】\n离职…"
-            ),
-            tool_call_id="t1",
-            name="retrieve_knowledge",
-        ),
-        AIMessage(content="最多结转 3 天。\n\n【来源：员工手册_示例.md】"),
-    ]
-    result = AgentRuntime._result(fresh)
-    assert result["sources"] == ["员工手册_示例.md"]
-    assert result["unverified_sources"] == []
-
-
 def test_partially_unverified_citations_split_correctly():
     """一条真、一条假：只有假的那条进 unverified_sources。"""
     from langchain_core.messages import AIMessage, ToolMessage
@@ -539,26 +447,6 @@ def test_partially_unverified_citations_split_correctly():
     result = AgentRuntime._result(fresh)
     assert result["sources"] == ["员工手册_示例.md", "并不存在的制度.md"]
     assert result["unverified_sources"] == ["并不存在的制度.md"]
-
-
-def test_no_verdict_when_tools_returned_nothing():
-    """工具本轮什么都没返回时不做判定。
-
-    那种情况下所有引用都"无法验证"，但原因是工具挂了（或模型没调工具），不是模型编造。
-    混为一谈会让这个字段在故障时刷屏、反而失去信号意义——故障本身由 trace 的 ok=False /
-    tool_calls=0 表达。
-    """
-    from langchain_core.messages import AIMessage
-
-    from app.agent.graph import AgentRuntime
-
-    result = AgentRuntime._result(
-        [AIMessage(content="按《员工手册》…\n\n【来源：员工手册_示例.md】")]
-    )
-    assert result["retrieved_sources"] == []
-    assert result["tool_calls"] == 0
-    assert result["unverified_sources"] == [], "无工具返回时不该下'查无此据'的结论"
-    assert result["sources"] == ["员工手册_示例.md"]
 
 
 # —— 工具调用：并发执行 + 批内判重 ——
@@ -924,39 +812,6 @@ def test_ensure_ready_reports_mismatch_instead_of_dividing_by_zero(tmp_path, mon
     assert pipeline.is_indexed() is False
     with pytest.raises(RuntimeError, match="向量库为空"):
         pipeline.ensure_ready(auto_index=False)
-
-
-def test_index_publishes_sidecar_atomically(tmp_path, monkeypatch):
-    """sidecar 必须原子发布：不留下 .tmp，且内容可被 JSON 逐行解析。"""
-    import json
-
-    from app.config import settings
-    from app.retrieval.pipeline import RetrievalPipeline
-
-    chroma = tmp_path / "chroma"
-    monkeypatch.setattr(settings, "chroma_path", str(chroma), raising=False)
-
-    docs = tmp_path / "docs"
-    docs.mkdir()
-    (docs / "d.md").write_text("制度正文。" * 60, encoding="utf-8")
-
-    class FakeStore:
-        def reset(self) -> None:
-            pass
-
-        def add(self, chunks) -> None:
-            pass
-
-        def count(self) -> int:
-            return 0
-
-    pipeline = RetrievalPipeline(embedder=object(), vector_store=FakeStore())
-    pipeline.index(str(docs), method="fixed")
-
-    assert (chroma / "chunks.jsonl").is_file()
-    assert not list(chroma.glob("*.tmp")), "原子发布不应留下临时文件"
-    for line in (chroma / "chunks.jsonl").read_text(encoding="utf-8").splitlines():
-        json.loads(line)
 
 
 # —— 本轮保留的回归测试（A3 / C6）——

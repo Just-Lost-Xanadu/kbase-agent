@@ -329,15 +329,24 @@ _CITATION_RE = re.compile(r"【来源：([^】]+)】")
 # 与 app/retrieval/loader.SUPPORTED_EXTS 一致（有单测断言两者相等，防漂移）
 _SOURCE_EXTS: tuple[str, ...] = (".md", ".txt", ".docx", ".xlsx", ".pdf")
 _CITATION_SPLIT = re.compile(r"[、,，;；/]+")
+_CITATION_BRACKETS = {"（": "）", "(": ")", "【": "】", "[": "]"}
+# 文件名后面常跟一句说明（「X.md（已核对）」）或句号。判据必须允许后缀，
+# 否则这段会被当成"不是文件名"，与相邻段落一起被粘成一个复合来源。
+_SOURCE_NAME_PREFIX = re.compile(
+    r"^\s*[^\s、,，;；/]+?\.(?:"
+    + "|".join(ext[1:] for ext in _SOURCE_EXTS)
+    + r")(?=$|[\s、,，;；/。．:：）)】\]])",
+    re.IGNORECASE,
+)
 
 
 def _looks_like_source_name(text: str) -> bool:
-    """这段文字看起来像"语料里的文件名"吗（以已知扩展名结尾）。
+    """这段文字看起来像"语料里的文件名"吗（以已知扩展名开头，可带说明后缀）。
 
     判据只用扩展名，不必读语料目录：本项目的 source 一律是 `data/docs` 下的真实文件名
     （见 app/retrieval/loader.py 的 SUPPORTED_EXTS），都以这五种扩展名结尾。
     """
-    return text.strip().lower().endswith(_SOURCE_EXTS)
+    return bool(_SOURCE_NAME_PREFIX.match(text.strip()))
 
 
 def _split_citation_names(raw: str) -> list[str]:
@@ -353,13 +362,26 @@ def _split_citation_names(raw: str) -> list[str]:
     规则：**只在"相邻两段里至少有一段像文件名"处分组**。于是连续的非文件名片段
     （也就是那句描述）会自然粘回一起，而 `A.md、B.md` 照旧拆开；合法文件名与描述混在
     一个括号里时也不会被粘住。README 承诺的"答案写了什么要如实保留"在两种写法下都成立。
+
+    分隔符只在**括号外**才算数：`A.md（已核对,含附件）、B.md` 里的逗号是说明文字，
+    不是来源分隔符。旧实现按全文正则切分，会把括号里的说明也切开，再按扩展名
+    拼回一个残缺的来源名。
     """
-    separators = list(_CITATION_SPLIT.finditer(raw))
+    separators: list[tuple[int, int]] = []
+    depth = 0
+    for index, char in enumerate(raw):
+        if char in _CITATION_BRACKETS:
+            depth += 1
+        elif char in _CITATION_BRACKETS.values():
+            depth = max(0, depth - 1)
+        elif depth == 0 and _CITATION_SPLIT.fullmatch(char):
+            separators.append((index, index + 1))
+
     segments: list[str] = []
     pos = 0
-    for match in separators:
-        segments.append(raw[pos:match.start()])
-        pos = match.end()
+    for start, end in separators:
+        segments.append(raw[pos:start])
+        pos = end
     segments.append(raw[pos:])
     if len(segments) == 1:
         return [segments[0].strip()] if segments[0].strip() else []
@@ -369,8 +391,8 @@ def _split_citation_names(raw: str) -> list[str]:
     start = 0
     for index in range(1, len(segments)):
         if looks_like_file[index - 1] or looks_like_file[index]:
-            groups.append(raw[start:separators[index - 1].start()])
-            start = separators[index - 1].end()
+            groups.append(raw[start:separators[index - 1][0]])
+            start = separators[index - 1][1]
     groups.append(raw[start:])
     return [group.strip() for group in groups if group.strip()]
 

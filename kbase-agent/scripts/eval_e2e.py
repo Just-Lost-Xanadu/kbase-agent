@@ -23,7 +23,7 @@
 报告末尾按 difficulty 分档汇总——一个总命中率会掩盖"难例全军覆没"。
 
 用法：
-    python scripts/eval_e2e.py --tag baseline              # 全量 40 条，记为 baseline
+    python scripts/eval_e2e.py --tag baseline              # 全量 60 条，记为 baseline
     python scripts/eval_e2e.py --tag v2-prompt             # 改动后再跑一次
     python scripts/eval_e2e.py --tag v2-prompt --compare baseline   # 打印与基线的回归 diff
     python scripts/eval_e2e.py --limit 5                   # 冒烟（不落报告；不要与 --tag 同用）
@@ -101,7 +101,7 @@ def _load_cases() -> list[dict]:
 def _percentile(values: list[int | float], q: float) -> float:
     """线性插值分位数（与 numpy.percentile 默认口径一致，避免依赖 numpy）。
 
-    n=40、q=0.95 时落在这两份报告的实测区间内；样本极少（n<3）时退化为最大/最小值，
+    n=60、q=0.95 时落在这两份报告的实测区间内；样本极少（n<3）时退化为最大/最小值，
     该口径已写进 README，便于复核分位数是怎么算出来的。
     """
     if not values:
@@ -120,7 +120,7 @@ def _latency(results: list[dict]) -> dict:
     """从已有 per-case 里算延迟分位（纯离线，数据来自 recorder 的 duration_ms）。
 
     口径说明：p50/p95 是"单次问答端到端耗时"，含 MCP 子进程启动 + 检索 + LLM 往返；
-    样本是 40 条单轮金标集，不是线上流量，只用于改动前后的相对比较。
+    样本是 60 条单轮金标集，不是线上流量，只用于改动前后的相对比较。
     """
     durations = [r["duration_ms"] for r in results if r.get("duration_ms") is not None]
     return {
@@ -266,7 +266,7 @@ async def run_eval(limit: int, tag: str | None, compare: str | None) -> None:
     后者会覆盖前者，于是 `asyncio.run(main(limit=...))` 调到自己并抛
     `TypeError: main() got an unexpected keyword argument 'limit'`——
     整条 `--limit/--tag/--compare` 路径（也就是 README 里写的用法）会直接崩。
-    回归测试：`tests/test_eval_cli.py::test_e2e_cli_limit_path_reaches_async_entry`。
+    回归测试：入口参数校验在 `main()` 里，`--limit < 0` 与 `--tag + --limit` 都会直接报错。
     """
     from app.agent.graph import create_runtime
 
@@ -280,7 +280,7 @@ async def run_eval(limit: int, tag: str | None, compare: str | None) -> None:
         for idx, case in enumerate(cases, start=1):
             # 每条用例一个独立 thread，跑完立刻删（见 AgentRuntime.aclose_thread）：
             # 不显式给 session_id 的话，LangGraph 每轮现造 uuid 线程且没人回收，
-            # 40 条就是 40 个永久残留——而这张表正是服务在用的 data/checkpoints.sqlite。
+            # 60 条就是 60 个永久残留——而这张表正是服务在用的 data/checkpoints.sqlite。
             thread_id = f"eval-{case['id']}-{uuid.uuid4().hex[:8]}"
             r = await _run_case(runtime, case, thread_id)
             await runtime.aclose_thread(thread_id)
