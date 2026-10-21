@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  kbase-agent 一键启动（Windows PowerShell）
 #  用法：双击 start.bat，或在此目录执行  ./start.ps1
 #  可选参数：-NoStart  只做检查/补装/建索引，不拉起服务
@@ -27,11 +27,16 @@ $python = if (Test-Path "$Root\.venv\Scripts\python.exe") {
     if ($g) { (Get-Command python).Source } else { $null }
 }
 if (-not $python) {
-    Write-Host "未找到 python，请先安装 Python 3.10+ 并加入 PATH"
+    Write-Host "未找到 python，请先安装 Python 3.12+ 并加入 PATH"
     Read-Host "按回车退出"; exit 1
 }
 Write-Host "python: $python"
 & $python --version 2>&1 | ForEach-Object { Write-Host "    $_" }
+& $python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "需要 Python 3.12+（pyproject.toml 的 requires-python），请升级后重试。"
+    Read-Host "按回车退出"; exit 1
+}
 
 # ---------- 2. 虚拟环境 ----------
 Step "2/5 检查虚拟环境"

@@ -145,7 +145,7 @@
   // 根本没有 X。实测真的发生过——模型甚至在括号里写了"（知识库检索失败,无制度文件可引用）"，
   // 而那一轮两次工具调用都成功了。这种"查无此据的引用"必须单独、显眼地标出来。
   function renderSources(container, cited, retrieved, toolCalls, unverified) {
-    // 只有拿到明确的 0 才提示：历史消息接口不返回该字段（undefined），此时不做任何判断
+    // 只有拿到明确的 0 才提示：旧历史消息没有 tool_calls 字段（undefined），此时不做判断
     const noFreshLookup = toolCalls === 0;
     const unverifiedSet = new Set(unverified || []);
     const cite = cited || [];
@@ -243,7 +243,11 @@
       const first = msgs.find(m => m.role === 'user');
       labelEl.textContent = first ? shortLabel(first.content) : '历史会话';
     }
-    for (const m of msgs) addMsg(m.role === 'user' ? 'user' : 'bot', m.content, m.sources || []);
+    for (const m of msgs) {
+      if (m.role === 'user') addMsg('user', m.content);
+      else addMsg('bot', m.content, m.sources || [], m.retrieved_sources || [],
+                  m.tool_calls, m.unverified_sources || []);
+    }
     refreshSessions();
   }
 

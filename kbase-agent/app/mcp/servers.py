@@ -171,8 +171,14 @@ def query_business_db(question: str) -> str:
     # 用户永远问不到数据）。重复行本身交给数据侧去修。
     # 注意：匹配仍是**子串**匹配（`r["name"] in question`），所以"张伟明"会命中"张伟"——
     # 这个误伤风险已在 README「已知取舍」如实写明，生产化方向是实体抽取 + 唯一 ID。
+    # name 也必须是字符串：records.jsonl 可被用户编辑，混进 {"name": 123}
+    # 时 `123 in question` 会抛 TypeError，整把工具变成"工具失败"。
     matched_names = list(
-        dict.fromkeys(r["name"] for r in records if r.get("name") and r["name"] in question)
+        dict.fromkeys(
+            r["name"]
+            for r in records
+            if isinstance(r.get("name"), str) and r["name"] and r["name"] in question
+        )
     )
     if not matched_names:
         return (
@@ -186,7 +192,16 @@ def query_business_db(question: str) -> str:
         )
     # 与上面那行同一口径：这里也必须用 .get("name")——records.jsonl 是面向用户可编辑的数据文件，
     # 只要混进一条没有 name 键、且排在命中记录之前的行，直接下标就会 KeyError（工具直接报错）。
-    matched = next(r for r in records if r.get("name") == matched_names[0])
+    matched = next(
+        (
+            r
+            for r in records
+            if isinstance(r.get("name"), str) and r.get("name") == matched_names[0]
+        ),
+        None,
+    )
+    if matched is None:  # 理论上 matched_names 已保证存在，防御性兜底
+        return "业务系统中暂无可用的员工记录。"
     # 四个字段统一用 .get()。records.jsonl 是**面向用户可编辑的**数据文件，缺字段是常态
     # （手工加一行只写了姓名、从别处粘过来少了 latest_expense…）。原先只有 name 用了 .get()，
     # 缺其余键时工具直接 KeyError：用户看到的是"工具失败"，既不知道缺哪个字段，也无从修数据。

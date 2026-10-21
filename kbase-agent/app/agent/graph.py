@@ -317,14 +317,35 @@ def _parse_sources(messages: list) -> list[str]:
             continue
         for line in _text_of(message.content).splitlines():
             line = line.strip()
-            if line.startswith("【来源：") and "】" in line:
-                source = line.split("】", 1)[0][len("【来源：") :]
+            if line.startswith(("【来源：", "【来源:")) and "】" in line:
+                source = line.split("】", 1)[0].split("：", 1)[-1].split(":", 1)[-1]
                 if source and source not in sources:
                     sources.append(source)
     return sources
 
 
-_CITATION_RE = re.compile(r"【来源：([^】]+)】")
+def _retrieval_ran(messages: list) -> bool:
+    """本轮是否真的执行过检索（用于区分"检索了但 0 命中"与"根本没检索/工具故障"）。
+
+    只有成功返回的 ToolMessage 才算数：工具自身报错（`错误：...`）、超时、会话不可用
+    都不是"检索到了但没有命中"，此时不做 unverified 判定（与 README 的口径一致）。
+    """
+    for message in messages:
+        if getattr(message, "type", "") != "tool":
+            continue
+        if getattr(message, "name", "") != "retrieve_knowledge":
+            continue
+        text = _text_of(message.content).lstrip()
+        if text.startswith("错误："):
+            continue
+        head = text[:120]
+        if "调用超时" in head or "调用失败" in head or "工具暂时不可用" in head:
+            continue
+        return True
+    return False
+
+
+_CITATION_RE = re.compile(r"【来源[：:]([^】]+)】")
 # 同一个【来源：…】括号内的多个文件名分隔符（模型会写"A、B、C"，也可能用逗号/分号/斜杠）
 # 与 app/retrieval/loader.SUPPORTED_EXTS 一致（有单测断言两者相等，防漂移）
 _SOURCE_EXTS: tuple[str, ...] = (".md", ".txt", ".docx", ".xlsx", ".pdf")
@@ -335,7 +356,7 @@ _CITATION_BRACKETS = {"（": "）", "(": ")", "【": "】", "[": "]"}
 _SOURCE_NAME_PREFIX = re.compile(
     r"^\s*[^\s、,，;；/]+?\.(?:"
     + "|".join(ext[1:] for ext in _SOURCE_EXTS)
-    + r")(?=$|[\s、,，;；/。．:：）)】\]])",
+    + r")(?=$|[\s、,，;；/。．:：）)】\]（(])",
     re.IGNORECASE,
 )
 
@@ -428,8 +449,24 @@ def _parse_citations(answer: str) -> list[str]:
     return citations
 
 
+def _citation_has_evidence(citation: str, retrieved_set: set[str]) -> bool:
+    """引用是否能在本轮检索结果里找到证据。
+
+    除了精确相等，还接受"文件名 + 说明后缀"的常见写法：
+    模型会写 `员工手册_示例.md（已核对）`，这不是编造，只是多了括号说明。
+    仍保留原文进 `sources`，判定时按文件名前缀匹配。
+    """
+    if citation in retrieved_set:
+        return True
+    for name in retrieved_set:
+        if citation.startswith(name) and len(citation) > len(name):
+            if citation[len(name)] in "（( \t—【[":
+                return True
+    return False
+
+
 def _split_verified_citations(
-    citations: list[str], retrieved: list[str]
+    citations: list[str], retrieved: list[str], retrieval_ran: bool = False
 ) -> tuple[list[str], list[str]]:
     """把答案里标出来的引用拆成"本轮检索真的返回过"与"查无此据"两组。
 
@@ -456,14 +493,27 @@ def _split_verified_citations(
     消费方按 `unverified_sources` 就能一眼看出哪些引用站不住。
     """
     retrieved_set = set(retrieved)
-    # 工具因超时/异常没返回任何来源时，retrieved_set 为空，此时**不做判定**：
-    # 那种情况下所有引用都"无法验证"，但原因是工具挂了而不是模型编造，混为一谈会让
-    # 这个字段在故障时刷屏、反而失去信号意义。故障本身由 trace 的 ok=False 表达。
-    if not retrieved_set:
+    # 三态口径（旧实现把前两种混成了一种，导致"检索 0 命中 + 模型写来源"被静默放过）：
+    #   ① 本轮根本没调检索，或检索工具故障 → 不做判定（引用"无法验证"而不是"编造"）；
+    #   ② 检索成功但 0 命中 → 此时所有引用都没有本轮证据，全部进 unverified；
+    #   ③ 检索成功且有命中 → 逐条比对。
+    if not retrieved_set and not retrieval_ran:
         return list(citations), []
-    verified = [c for c in citations if c in retrieved_set]
-    unverified = [c for c in citations if c not in retrieved_set]
+    verified = [c for c in citations if _citation_has_evidence(c, retrieved_set)]
+    unverified = [c for c in citations if not _citation_has_evidence(c, retrieved_set)]
     return verified, unverified
+
+
+def _tool_error_text(name: str, text: str) -> str | None:
+    """工具"正常返回但内容其实是错误"的判定。
+
+    `retrieve_knowledge` 的契约是出错也返回 `错误：...` 文本（不向 MCP 传输层抛异常），
+    否则模型拿不到可读原因。但这让 trace 误以为 `ok=True`。这里把这种业务错误
+    显式标出来，让 /api/runs 的 ok 字段与真实执行结果一致。
+    """
+    if name == "retrieve_knowledge" and text.lstrip().startswith("错误："):
+        return text.strip()[:160]
+    return None
 
 
 def _truncate_tool_output(text: str, limit: int) -> str:
@@ -514,6 +564,45 @@ def _final_answer(messages: list) -> str:
             if text:
                 return text
     return ""
+
+
+def _dangling_tool_messages(messages: list) -> list:
+    """给"上一条 AI 消息里有 tool_calls、却没有对应 ToolMessage"的历史补占位消息。
+
+    触发场景：客户端在 tools 节点执行途中断开（SSE 断连很常见），LangGraph 已经把
+    `Human + AI(tool_calls)` 提交进 checkpoint，但节点被取消、没有写回 ToolMessage。
+    下一次同 thread 续聊时，模型会收到一个没有工具结果的 `tool_calls`，OpenAI 兼容
+    接口通常直接 400。补一条"未执行"的 ToolMessage 让历史重新合法，比丢弃整段会话好。
+    """
+    from langchain_core.messages import ToolMessage
+
+    last_ai = -1
+    for index, message in enumerate(messages):
+        if getattr(message, "type", "") == "ai" and getattr(message, "tool_calls", None):
+            last_ai = index
+    if last_ai < 0:
+        return []
+    calls = getattr(messages[last_ai], "tool_calls", None) or []
+    answered = {
+        getattr(message, "tool_call_id", None)
+        for message in messages[last_ai + 1 :]
+        if getattr(message, "type", "") == "tool"
+    }
+    repairs = []
+    for call in calls:
+        call_id = call.get("id")
+        if call_id and call_id not in answered:
+            repairs.append(
+                ToolMessage(
+                    content=(
+                        "上一轮工具调用在完成前被中断（客户端断开或请求取消），"
+                        "该调用没有执行。请基于现有信息重新作答。"
+                    ),
+                    tool_call_id=call_id,
+                    name=call.get("name", ""),
+                )
+            )
+    return repairs
 
 
 def _is_transient_llm_error(exc: BaseException) -> bool:
@@ -706,6 +795,10 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                 item["content"] = _truncate_tool_output(
                     _text_of(raw), AgentLimits.max_tool_output_chars
                 )
+                error_text = _tool_error_text(name, item["content"])
+                if error_text:
+                    item["ok"] = False
+                    item["note"] = error_text
             except TimeoutError:
                 item["content"] = (
                     f"工具 {name} 调用超时（>{AgentLimits.step_timeout_seconds}s）"
@@ -760,6 +853,10 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                         item["content"] = _truncate_tool_output(
                             _text_of(raw), AgentLimits.max_tool_output_chars
                         )
+                        error_text = _tool_error_text(name, item["content"])
+                        if error_text:
+                            item["ok"] = False
+                            item["note"] = error_text
                         item["retried"] = "会话失效后重建，重试成功"
                         item["duration_ms"] = now_ms() - t0
                         return
@@ -882,6 +979,11 @@ class AgentRuntime:
         lc_messages = self._to_lc_messages(messages)
         if not existing:
             lc_messages = [SystemMessage(content=SYSTEM_PROMPT)] + lc_messages
+        else:
+            # 修复"取消发生在 tools 执行途中"留下的悬空 tool_calls（见 helper 说明）。
+            repairs = _dangling_tool_messages(prior_messages)
+            if repairs:
+                lc_messages = repairs + lc_messages
         return lc_messages, config, len(prior_messages)
 
     async def ainvoke(self, messages: list[dict], session_id: str | None = None) -> dict:
@@ -921,7 +1023,9 @@ class AgentRuntime:
         answer = _final_answer(fresh)
         citations = _parse_citations(answer)
         retrieved = _parse_sources(fresh)
-        _, unverified = _split_verified_citations(citations, retrieved)
+        _, unverified = _split_verified_citations(
+            citations, retrieved, retrieval_ran=_retrieval_ran(fresh)
+        )
         if tool_call_count is None:
             # 兼容直接调用 _result 的单测/脚本：没有图状态可读时退回旧口径。
             tool_call_count = sum(1 for m in fresh if getattr(m, "type", "") == "tool")
@@ -1061,9 +1165,21 @@ async def create_runtime() -> AgentRuntime:
 
 
 async def run_single_question(question: str, session_id: str | None = None) -> dict:
-    """CLI/脚本用：一次 asyncio.run 内建运行时并答一个问题（演示/自测）。"""
+    """CLI/脚本用：一次 asyncio.run 内建运行时并答一个问题（演示/自测）。
+
+    没有 session_id 时 thread_id 由这里显式生成并在结束后回收：旧实现交给
+    `_config()` 内部现造 uuid，调用方拿不到、也没人删，`demo_agent.py` 每跑一次
+    就在服务侧的 checkpoint 库里留一个永久孤儿线程。
+    """
+    thread_id = session_id or f"oneshot-{uuid.uuid4().hex}"
     runtime = await create_runtime()
     try:
-        return await runtime.ainvoke([{"role": "user", "content": question}], session_id)
+        return await runtime.ainvoke(
+            [{"role": "user", "content": question}], thread_id
+        )
     finally:
-        await runtime.aclose()
+        try:
+            if session_id is None:
+                await runtime.aclose_thread(thread_id)
+        finally:
+            await runtime.aclose()

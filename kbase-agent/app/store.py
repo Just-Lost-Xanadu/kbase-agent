@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS messages (
     role            TEXT NOT NULL,
     content         TEXT NOT NULL,
     sources         TEXT,
+    retrieved_sources TEXT,
+    tool_calls      INTEGER,
+    unverified_sources TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id);
@@ -59,6 +62,11 @@ CREATE INDEX IF NOT EXISTS idx_run_traces_started ON run_traces(started_at);
 # 两者是不同口径（见 app/agent/graph.py 的 _parse_citations 说明），不能共用一列。
 MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("run_traces", "retrieved_sources", "ALTER TABLE run_traces ADD COLUMN retrieved_sources TEXT"),
+    # 历史消息也要带上引用可验证性字段：否则刷新页面后，"查无此据"的红色提示
+    # 会消失，同一条编造引用在实时响应与历史里显示成两个样子。
+    ("messages", "retrieved_sources", "ALTER TABLE messages ADD COLUMN retrieved_sources TEXT"),
+    ("messages", "tool_calls", "ALTER TABLE messages ADD COLUMN tool_calls INTEGER"),
+    ("messages", "unverified_sources", "ALTER TABLE messages ADD COLUMN unverified_sources TEXT"),
 )
 
 # get_trace 的显式列清单：原先用 `SELECT *` + 位置 zip，任何一次加列（就像上面这条迁移）
@@ -100,6 +108,9 @@ async def save_turn(
     user_content: str,
     answer: str,
     sources: list[str],
+    retrieved_sources: list[str] | None = None,
+    tool_calls: int | None = None,
+    unverified_sources: list[str] | None = None,
 ) -> None:
     """记录一轮对话：新建/更新会话 + 追加 user/assistant 两条消息。"""
     now = "datetime('now', 'localtime')"
@@ -120,11 +131,18 @@ async def save_turn(
             (conversation_id, user_content),
         )
         await db.execute(
-            "INSERT INTO messages (conversation_id, role, content, sources) VALUES (?, 'assistant', ?, ?)",
+            "INSERT INTO messages "
+            "(conversation_id, role, content, sources, retrieved_sources, tool_calls, unverified_sources) "
+            "VALUES (?, 'assistant', ?, ?, ?, ?, ?)",
             (
                 conversation_id,
                 answer,
                 json.dumps(sources, ensure_ascii=False) if sources else None,
+                json.dumps(retrieved_sources, ensure_ascii=False)
+                if retrieved_sources is not None else None,
+                tool_calls,
+                json.dumps(unverified_sources, ensure_ascii=False)
+                if unverified_sources is not None else None,
             ),
         )
         await db.commit()
@@ -174,7 +192,8 @@ async def get_messages(conversation_id: str) -> list[dict]:
     db = await _conn()
     try:
         cur = await db.execute(
-            "SELECT role, content, sources, created_at FROM messages "
+            "SELECT role, content, sources, retrieved_sources, tool_calls, "
+            "unverified_sources, created_at FROM messages "
             "WHERE conversation_id = ? ORDER BY id ASC",
             (conversation_id,),
         )
@@ -182,15 +201,30 @@ async def get_messages(conversation_id: str) -> list[dict]:
         await cur.close()
     finally:
         await db.close()
+
+    def _list(raw) -> list[str]:
+        if not raw:
+            return []
+        try:
+            value = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        return value if isinstance(value, list) else []
+
     out = []
-    for role, content, sources, created_at in rows:
-        parsed = []
-        if sources:
-            try:
-                parsed = json.loads(sources)
-            except (json.JSONDecodeError, TypeError):
-                parsed = []
-        out.append({"role": role, "content": content, "sources": parsed, "created_at": created_at})
+    for role, content, sources, retrieved, tool_calls, unverified, created_at in rows:
+        out.append(
+            {
+                "role": role,
+                "content": content,
+                "sources": _list(sources),
+                "retrieved_sources": _list(retrieved),
+                # 旧消息没有该列（NULL）→ 前端按 undefined 处理，不做"本轮未检索"判断
+                "tool_calls": tool_calls,
+                "unverified_sources": _list(unverified),
+                "created_at": created_at,
+            }
+        )
     return out
 
 
@@ -235,7 +269,10 @@ async def save_trace(
                 recorder_summary.get("question", ""),
                 answer,
                 json.dumps(sources, ensure_ascii=False) if sources else None,
-                json.dumps(retrieved_sources, ensure_ascii=False) if retrieved_sources else None,
+                # 新数据即使为空也写 "[]"：SQL NULL 专门留给"字段尚未采集"的旧数据，
+                # 这样 API 消费方可以按 null / [] 区分两代口径（README 的判据）。
+                json.dumps(retrieved_sources, ensure_ascii=False)
+                if retrieved_sources is not None else None,
                 json.dumps(recorder_summary.get("steps", []), ensure_ascii=False),
                 recorder_summary.get("prompt_tokens", 0),
                 recorder_summary.get("completion_tokens", 0),
@@ -298,9 +335,18 @@ async def get_trace(trace_id: int) -> dict | None:
         return None
     data = dict(zip(TRACE_COLUMNS, row))
     data["cost_cny"] = round(data["cost_cny"] or 0.0, 4)
-    for key in ("sources", "retrieved_sources", "steps"):
+    for key in ("sources", "steps"):
         try:
             data[key] = json.loads(data[key]) if data[key] else []
         except (json.JSONDecodeError, TypeError):
             data[key] = []
+    # retrieved_sources 的 SQL NULL 有专门语义：旧数据没有采集这个字段。
+    # 全部抹成 [] 会让 README 承诺的"按 null 区分旧数据"失效。
+    if data["retrieved_sources"] is None:
+        data["retrieved_sources"] = None
+    else:
+        try:
+            data["retrieved_sources"] = json.loads(data["retrieved_sources"])
+        except (json.JSONDecodeError, TypeError):
+            data["retrieved_sources"] = []
     return data

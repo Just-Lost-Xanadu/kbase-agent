@@ -119,8 +119,12 @@ async def _reclaim_one_shot(runtime, thread_id: str, ephemeral: bool) -> None:
         await runtime.aclose_thread(thread_id)
 
 
-async def _record_turn(req: ChatRequest, answer: str, sources: list[str]) -> None:
-    """把一轮对话写入会话记录表（仅显式带 session_id 的请求；供读历史接口用）。"""
+async def _record_turn(req: ChatRequest, result: dict) -> None:
+    """把一轮对话写入会话记录表（仅显式带 session_id 的请求；供读历史接口用）。
+
+    除了答案引用，也保存检索命中、执行次数与"查无此据"：历史消息渲染要和实时响应
+    用同一套字段，否则刷新页面后编造的引用会重新变成正常引用。
+    """
     if not req.session_id:
         return
     from app import store
@@ -130,8 +134,11 @@ async def _record_turn(req: ChatRequest, answer: str, sources: list[str]) -> Non
         req.session_id,
         title=(last_user or "新会话")[:40],
         user_content=last_user,
-        answer=answer,
-        sources=sources,
+        answer=result.get("answer", ""),
+        sources=result.get("sources", []) or [],
+        retrieved_sources=result.get("retrieved_sources", []) or [],
+        tool_calls=result.get("tool_calls", 0),
+        unverified_sources=result.get("unverified_sources", []) or [],
     )
 
 
@@ -168,7 +175,7 @@ async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
     # 本函数 docstring 声明不会出现的"只有问题没有答案"，前端预览也会是空串。
     if result is not None and (answer or "").strip():
         try:
-            await _record_turn(req, answer, sources)
+            await _record_turn(req, result)
         except Exception:  # noqa: BLE001, S110
             pass
     try:

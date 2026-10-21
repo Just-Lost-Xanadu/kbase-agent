@@ -55,18 +55,41 @@ class RetrievalPipeline:
         except (OSError, UnicodeDecodeError):
             return None
         chunks: list[dict] = []
+        seen_ids: set[str] = set()
         for line in raw.splitlines():
             if not line.strip():
                 continue
             try:
-                chunks.append(json.loads(line))
+                item = json.loads(line)
             except json.JSONDecodeError:
                 return None
+            # 合法 JSON 不等于合法分块：缺 content/source 会让 BM25Index 在 ensure_ready
+            # 里抛 KeyError，而 is_indexed() 仍为 True —— 服务对每个请求 503 且不自愈。
+            if not isinstance(item, dict):
+                return None
+            content = item.get("content")
+            source = item.get("source")
+            chunk_id = item.get("chunk_id")
+            if not isinstance(content, str) or not content:
+                return None
+            if not isinstance(source, str) or not source:
+                return None
+            if not isinstance(chunk_id, str) or not chunk_id:
+                return None
+            if chunk_id in seen_ids:
+                return None
+            seen_ids.add(chunk_id)
+            chunks.append(item)
         return chunks or None
 
     def is_indexed(self) -> bool:
         try:
-            return self._load_chunks() is not None and self.vector_store.count() > 0
+            chunks = self._load_chunks()
+            if chunks is None:
+                return False
+            # 数量必须一致：只查 count>0 时，"旧 sidecar + reset 后只写入一半向量"
+            # 会被误判为可用，向量路与 BM25 路从此各查各的。
+            return self.vector_store.count() == len(chunks)
         except Exception:  # noqa: BLE001  # 任何读取失败都等价于“没有索引”，交给上层自动重建（见 _load_chunks 说明）
             return False
 
@@ -76,9 +99,18 @@ class RetrievalPipeline:
             return
         chunks = self._load_chunks()
         if chunks:
-            if self.vector_store.count() <= 0:
+            count = self.vector_store.count()
+            if count <= 0:
                 raise RuntimeError(
                     "索引不一致：分块清单存在但向量库为空。请重跑 python scripts/index_docs.py"
+                )
+            if count != len(chunks):
+                if auto_index:
+                    self.index()
+                    return
+                raise RuntimeError(
+                    f"索引不一致：分块清单 {len(chunks)} 条，向量库 {count} 条。"
+                    "请重跑 python scripts/index_docs.py"
                 )
             self._bm25 = BM25Index(chunks)
             self._ready = True
@@ -121,6 +153,12 @@ class RetrievalPipeline:
             raise RuntimeError(
                 f"切分结果为空（文档 {len(documents)} 篇）：检查 data/docs 下文档是否有内容"
             )
+        # 重建期间先把内存态判为不可用：否则 reset/add 失败后 _ready 仍是 True、
+        # _bm25 还指着旧分块，后续 retrieve() 会绕过 ensure_ready() 继续用旧 BM25
+        # 配新向量（两路口径不一致，而且没人会去修）。
+        self._ready = False
+        self._bm25 = None
+
         # 破坏性操作（reset）之前，先把 embedding 模型加载起来——首次运行会下载模型，需要网络。
         #
         # 为什么必须前置：模型加载原本发生在 add() 里，而 add() 在 reset() **之后**。
@@ -144,22 +182,28 @@ class RetrievalPipeline:
         # _load_chunks 要兜的损坏态。os.replace 在同一文件系统内是原子的：
         # 要么看到旧文件、要么看到完整的新文件，不存在"读了一半"的中间态。
         tmp = sidecar.with_suffix(".jsonl.tmp")
-        tmp.write_text(
-            "\n".join(json.dumps(c, ensure_ascii=False) for c in chunks),
-            encoding="utf-8",
-        )
-        self.vector_store.reset()
-        self.vector_store.add(chunks)
+        invalidated = False
         try:
-            os.replace(tmp, sidecar)   # 向量写成功之后才发布 sidecar
-        except OSError:
-            # 这是本条链上唯一可能失败的一步（Windows 下目标文件被别的进程占用、磁盘满等），
-            # 而 MCP 子进程每次工具调用都会读这个 sidecar。失败时的状态是"collection 已是新分块、
-            # sidecar 还是旧的"——两路检索口径不一致，而 is_indexed()（sidecar 可读 + count>0）
-            # 仍返回 True，服务不会自愈。所以把旧 sidecar 一并删掉：is_indexed() 变 False，
-            # 下一个请求就会自动重建，而不是把错乱状态一直留在盘上。
-            with contextlib.suppress(OSError):
+            tmp.write_text(
+                "\n".join(json.dumps(c, ensure_ascii=False) for c in chunks),
+                encoding="utf-8",
+            )
+            # 在破坏 collection 之前先撤掉旧 sidecar：此后任何一步失败（reset/add/
+            # replace，含进程被杀）都会让 is_indexed() 为 False，从而自动重建；
+            # 旧 collection 反正马上要被 reset，留着旧 sidecar 只会制造错配。
+            with contextlib.suppress(FileNotFoundError):
                 sidecar.unlink()
+            invalidated = True
+            self.vector_store.reset()
+            self.vector_store.add(chunks)
+            os.replace(tmp, sidecar)   # 向量写成功之后才发布 sidecar
+        except BaseException:
+            # 清理临时文件；若已经撤掉旧 sidecar，确保失败后盘上不会留下"旧清单 + 新向量"。
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            if invalidated:
+                with contextlib.suppress(OSError):
+                    sidecar.unlink()
             raise
         self._bm25 = BM25Index(chunks)
         self._ready = True

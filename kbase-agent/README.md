@@ -92,7 +92,9 @@ docker compose up --build -d    # 首次会建索引并下载 embedding 模型�
 
 > 边界：Basic Auth 只适合演示/内网，裸 HTTP 下请求头可解码。公网部署请在反向代理上加 TLS，
 > 或换成 OAuth/JWT；本项目没有做多用户、角色和审计。
-> Linux 原生部署时 `requirements.lock` 里的 `pywin32` / `win32_setctime` 会被 Dockerfile 显式过滤。
+> **Linux 原生部署**不能直接 `pip install -r requirements.lock`：里面的 `pywin32` /
+> `win32_setctime` 是 Windows-only 且没有环境标记。Docker 构建时由 Dockerfile 显式过滤；
+> 裸机 Linux 请先过滤这两行，或使用 `pip install -e .` 的依赖区间。
 > 只跑 `pip install -e .` 可能装到不兼容的新版本——先装 lock、再装本包，是最稳的顺序。
 
 ## 使用
@@ -119,9 +121,12 @@ python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判
 
 API：
 - `GET /api/health`：存活探针，**不依赖 key / 索引**——503 排查时先打它，能区分"服务没起来"和"Agent 引擎没就绪"。
-- `POST /api/chat`：同步返回 `{answer, sources, retrieved_sources, tool_calls}`。
-- `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案、两个来源字段与 `tool_calls`。
+- `POST /api/chat`：同步返回 `{answer, sources, retrieved_sources, tool_calls, unverified_sources}`。
+- `POST /api/chat/stream`：SSE 逐步下发节点增量，`done` 事件带最终答案、两个来源字段、
+  `tool_calls` 与 `unverified_sources`。
 - `GET /api/sessions` / `GET /api/sessions/{session_id}/messages`：读会话列表与历史消息（给前端"历史会话"用）。
+  历史消息除 `sources` 外还返回 `retrieved_sources` / `tool_calls` / `unverified_sources`，
+  刷新页面后"查无此据""本轮未检索"仍按实时响应的同一套口径渲染（旧消息没有这些列时为 `null`/`[]`）。
 - `GET /api/runs` / `GET /api/runs/{id}`：运行 trace（耗时/token/成本/错误 + 节点级 steps），可观测用。
 - 请求体：`{messages:[{role,content}], session_id?}`。**同一 session 请只追加最新一条消息**（LangGraph 按 thread 自动拼历史，避免重复）。
 - **会话持久化**：Agent checkpoint（AsyncSqliteSaver）与消息记录共用 `data/checkpoints.sqlite`（WAL），**服务重启可续聊、历史可读**。
@@ -180,9 +185,11 @@ API：
 > - **查无此据的条目仍留在 `sources` 里**，不替模型删改："答案写了什么"这个事实要留住，
 >   消费方按 `unverified_sources` 就能看出哪些引用站不住。前端用红色单独一行标出
 >   **"⚠ 查无此据：X（本轮检索未返回该来源）"**。
-> - **工具本轮没有任何返回时不做判定**（该字段为空）：那时所有引用都"无法验证"，但原因是
->   工具挂了或模型没调工具，不是模型编造——混为一谈会让这个字段在故障时刷屏、失去信号意义。
->   那种情况由 `tool_calls=0` 或 trace 里的 `ok=False` 表达。
+> - **三态口径，别混成一种**：① 本轮没调检索、或检索工具故障（`错误：` / 超时 / 会话不可用）
+>   → 不做判定，该字段为空；② 检索成功但 **0 命中** → 此时所有引用都**没有本轮证据**，
+>   全部进 `unverified_sources`（这正是旧实现的漏洞：把"检索了但没命中"当成"没检索"放过了）；
+>   ③ 检索成功且有命中 → 逐条比对。工具业务错误现在也会把 trace 的 `ok` 标成 `False`，
+>   不再伪装成一次成功调用。
 > - 它同样**不测**"引用得对不对"：一条引用能被验证，只说明"本轮确实检索到了这篇"，
 >   不说明"答案对该篇的转述是准确的"。所以它是一个**可验证性**字段，不是"引用准确率"。
 
@@ -253,7 +260,7 @@ API：
 
 60 条是回归冒烟集，不是统计评测，因此本文所有结论都按"离线回归集 + 可视化坏例调参"的定性口径陈述，不用百分比对外描述能力。
 
-**五份入库报告的实测数字**（`docs/eval-reports/`，同口径可复算）：
+**关键五份入库报告的实测数字**（`docs/eval-reports/` 目录下共 9 份 JSON，下表列可横向对比的 5 份；其余是同一批改动的补充基线，同口径可复算）：
 
 | 报告 | tag / 时间 | 语料 | 用例 | answer_rate | 检索口径引用 | 答案引用口径 | 关键词覆盖 | 应拒答 | p50 延迟 | p95 延迟 | 总成本 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -282,7 +289,7 @@ API：
 > 延迟数字比 `corpus-v2` 低得多（p50 6646 → 2784 ms）属于**跨时间点的机器/网络条件差异**，
 > README 一贯口径是"单次运行的 p50/p95 只用于同环境相对比较"，不做绝对引用。
 
-**`corpus-v2` 的坏例（这才是这份报告真正的价值）**：60 条里 5 条没满分，每条都能定位到原因：
+**`corpus-v2` 的坏例（这才是这份报告真正的价值）**：60 条里 4 条没满分，每条都能定位到原因：
 
 | 用例 | 表现 | 原因 |
 |---|---|---|
@@ -328,7 +335,7 @@ API：
 - **仅 BM25** 靠字面匹配，抗住了大部分干扰，但仍会输给"话题词一样、事实不同"的邻居文档；
 - **RRF 把两路的排序合并**，两路都靠前的片段自然胜出——它在 k=3 上比最好的单路高 1.79 个点。
 
-> **这个消融能证明什么、不能证明什么（规模边界，先说清）**：整份语料库只有 **15,784 个字符**、
+> **这个消融能证明什么、不能证明什么（规模边界，先说清）**：整份语料库只有 **15,679 个字符**、
 > **40 个分块**、平均 **395 字符/块**、最长一块 **795 字符 < `chunk_size=800`**。也就是说这 40 块
 > 实质是"39 篇各一块 + 员工手册多切了一块"——**在默认的 `chunk_size=800` 下，recursive 切分器
 > 从未真正切开过任何一篇文档**。
@@ -337,7 +344,7 @@ API：
 > 真实企业知识库是万篇量级，那个量级上的结论本仓库给不出，也不假装给得出。
 >
 > ⚠️ **别把这段读成"切分参数是惰性的"——只有 `method` 接近惰性，`chunk_size` 完全不是。**
-> `method` 之所以差别极小，是因为按默认 800 切时**全语料只有 3 篇文档被"切分策略"真正碰到**
+> `method` 之所以差别极小，是因为按默认 800 切时**全语料只有 3 篇文档的块数变化 + 员工手册的切分边界不同（共 4 篇内容不同）**
 > （见下一节的 fixed vs recursive 对照）；而 `chunk_size` 是实打实的活参数（见 chunk_size 扫描表）。
 
 **但要说清它买的是什么**：把 `top_k` 从 1 扫到 5（56 条有真值用例），能看出 RRF 是**召回导向**的融合：
@@ -414,10 +421,11 @@ API：
 
 **差别只在 k≤2，k≥3 完全一样。** 原因很具体：`fixed` 是纯滑窗（步长 = 800 − 150 = 650），
 所以**任何长于 650 字符的文档都会被切成两块**（40 → 43 块）；而 `recursive` 优先按段落/句号等
-语义边界切，没触到 800 上限就不切。也就是说这份语料里**真正被"切分策略"碰到的文档只有 3 篇**
-（650~800 字符那几篇），其余 36 篇两种切法产出的分块逐字相同。
+语义边界切，没触到 800 上限就不切。也就是说这份语料里**块数真正变化的文档只有 3 篇**
+（650~800 字符那几篇），另有《员工手册》两边都是 2 块但切分边界不同；合计 4 篇内容不同，
+其余 **35 篇**两种切法产出的分块逐字相同。
 
-**这正是"语料太小"最直接的症状**：不是"切分策略完全不起作用"，而是**它只作用在 3/39 的文档上**，
+**这正是"语料太小"最直接的症状**：不是"切分策略完全不起作用"，而是**它只让 3/39 的文档块数变化（另有 1 篇边界不同）**，
 所以结论的统计效力极弱——顺带说明为什么本仓库不宣称"做了分块调优"。要让 `fixed` vs `recursive`
 产出有意义的对照，得先让语料里**大部分**文档都长到需要真正切分（即换成真实量级）。
 反过来，`chunk_size` 不受这个限制：它改变的是所有分块的粒度，所以扫描结果清晰可见。
@@ -436,8 +444,9 @@ flowchart TD
     E -- 是 --> F[生成回答 + 引用来源]
     C -- 否 --> F
     F --> G[SSE 节点级流式返回前端]
-    B -. 护栏 .-> H[recursion_limit / 单步超时 /<br/>输出截断 / 重复调用检测]
-    H -. 中断并基于现有信息收尾 .-> F
+    B -. 护栏 .-> H[max_steps 提示 / recursion_limit /<br/>单步超时 / 输出截断 / 重复调用检测]
+    H -. 提示层 max_steps 收敛 .-> F
+    H -. 框架层 recursion_limit 触发 .-> I[中止本轮并返回错误（HTTP 502）]
 ```
 
 ## 设计要点
@@ -445,6 +454,13 @@ flowchart TD
 - **框架**：LangGraph 有状态图、SQLite 断点续聊（AsyncSqliteSaver + WAL，重启不丢会话；高并发生产可换 Postgres）；选 LangGraph 而非预制 Agent 函数，是为了拿到显式状态、checkpoint 与精细护栏。
 - **MCP**：工具经 `langchain-mcp-adapters` 以真 MCP（stdio 子进程）接入，不是手写 function calling 的装饰——工具与编排解耦，天然可跨语言复用。**一个 runtime 常驻一个 stdio 会话**（`MultiServerMCPClient.session()` + `load_mcp_tools(session)`），而不是每次调用新起子进程：实测同一台机器上 `retrieve_knowledge` 单次 **3782→12ms**（首次 683ms 付子进程内冷加载），两把工具并发 **17ms**。会话失效（子进程被 OOM/杀掉）时按**传输层异常**判定并重建，一次调用内只重试一次；工具业务报错绝不触发重建。
 - **一批工具调用并发执行 + 整轮复用同一个 MCP 会话**：模型在一次 assistant 消息里给出多个 `tool_call`（例如"先查制度规则 + 再查个人数据"），本就表示它们互不依赖；`tools_node` 用 `asyncio.gather` 并发跑，而不是 `for … await` 串行相加。并发化最容易顺手拆掉的护栏是"批内重复调用判重"（串行实现里第二个相同调用会被第一个刚写进 history 的 key 拦下），所以现在是**先整批派单判重、再并发执行、最后按模型给的原序组装消息与 trace**——`tests/test_units.py::test_tools_node_runs_batch_concurrently_and_still_dedupes` 把这三件事一起锁住。
+  - **口径校正（重要）**：客户端用 `asyncio.gather` 并发**派单**，但 `app/mcp/servers.py`
+    里的两把工具是同步函数，FastMCP 1.x 会直接在 MCP 子进程的事件循环里调用它们——
+    因此**同一 server 内的实际执行仍是串行**。`17ms` 只能说明两次调用都很短，不能证明
+    两个工具在并行干活。`8127ms → 4663ms` 是历史上"每次调用新起一个 stdio 子进程"时的
+    测量（那时并发确实让两个子进程同时启动）；改成常驻会话后，延迟收益主要来自
+    "不再重复付解释器启动 + 依赖导入"，而不是工具执行并行。若以后确需工具级并行，
+    应把工具改成 `async def` 并用 `asyncio.to_thread` 承载同步检索。
   - 并发只解决"多个调用之间"，不解决"每次调用都要新起子进程"。真正的延迟大头是后者：`get_tools()` 返回的工具**无会话**，它的 `ainvoke` 内部会 `create_session` 新起一个 stdio 子进程、握手、调用、关掉——于是每次工具调用都要重付"解释器启动 + `import chromadb/onnxruntime`（约 3.0s）+ 子进程内冷加载 BM25/Chroma（约 0.68s）"。改成**常驻会话**后实测：`retrieve_knowledge` 首次 683ms、之后 **11~12ms**，两把工具并发 **17ms**。这把"每轮 1~2 次工具调用"从约 3.7~7.5s 压到约 15~700ms，端到端 p50 因此由约 6.6s 降到约 2s。
   - 常驻会话自带的失败面（子进程死掉）也一并处理：只在**传输层异常**（`anyio.ClosedResourceError` / `BrokenResourceError` / `EndOfStream`，及 SDK 换异常类型时的等价文本）时把当前代会话判死并重建，单次调用内重试一次；工具业务报错（检索异常、业务库没这个人）**不会**触发重建——否则一次正常报错会被放大成一次子进程重启。回归测试：`test_tool_session_reuses_one_session_for_many_calls` / `test_tool_session_rebuilds_only_on_transport_failure` / `test_tools_node_self_heals_when_session_dies` / `test_tools_node_does_not_rebuild_session_on_business_error`。
 - **RAG**：混合检索（向量 + BM25 做 RRF）做粗召回 + 可选重排 + 引用溯源；**语料 39 篇 / 40 分块，检索层有真实区分度**（仅向量 0.875、仅 BM25 0.964、RRF 0.982），坏例能说清差在哪一条、为什么差。
@@ -483,8 +499,8 @@ flowchart TD
 - 默认 FastEmbed（ONNX，零 torch）；要更准可 `EMBED_BACKEND=flagembedding` 上 bge-m3，或 `RERANK_ENABLED=true` 加重排——均需 `pip install -e ".[embed]"`。**换 embedding 后删除 `data/chroma/` 重建索引**。
 - 切分实现 fixed vs recursive 对比；语义 / 父子分块列为改进方向。
   命令已经具备（`python scripts/index_docs.py --method fixed` 重建 + `python scripts/eval.py --sweep-k`），
-  对照结果见「fixed vs recursive」表：**差别只在 k≤2，k≥3 完全一致**——因为全语料只有 3 篇文档
-  长于 fixed 的滑窗步长 650，只有它们被"切分策略"真正碰到，其余 36 篇两种切法产出逐字相同的分块。
+  对照结果见「fixed vs recursive」表：**差别只在 k≤2，k≥3 完全一致**——全语料只有 3 篇文档
+  长于 fixed 的滑窗步长 650（块数变化），另有《员工手册》切分边界不同；其余 35 篇产出逐字相同的分块。
   这个统计效力弱到**不足以支撑"我做了分块调优"这类结论**，要做有意义的对照得先把语料换成真实量级。
   （`chunk_size` 不受此限制，扫描结果见 chunk_size 表。）
 - DeepSeek 默认，`.env` 两行即可切 GLM / Qwen。
