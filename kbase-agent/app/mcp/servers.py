@@ -12,7 +12,8 @@
 #   TypeError: unsupported operand type(s) for |: 'function' and 'NoneType'
 # 正常收集顺序下被别的用例掩盖（它们先导入了本模块），换个顺序/单跑一个文件就会红。
 # 加上这个 future import 之后注解只是字符串，任何 patch 顺序都安全。
-# 回归测试：tests/test_units.py::test_servers_module_imports_when_pipeline_class_is_patched
+# （没有专门的回归用例守这一条：测试集里不存在针对该 patch 顺序的测试，
+#  "全量测试在任意顺序下都过" 只是间接保证。改这里时请自己按 patch 顺序手动验一次。）
 from __future__ import annotations
 
 import json

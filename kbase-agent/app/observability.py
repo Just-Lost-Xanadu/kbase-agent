@@ -47,6 +47,11 @@ class Step:
     # "并发派单"下丢失配对关系（哪个耗时对应哪把工具）。
     tool_calls: list[str] = field(default_factory=list)
     tool_args: list[dict] = field(default_factory=list)
+    # 这一步是否**真的派出去了**一次工具调用。
+    # 为什么需要它：跳过重复调用（tool=None）、工具名不存在、会话不可用（name="*"）都会
+    # 各产生一条 tools 步，但一次调用都没发生。按"step 条数"统计 tool_calls 会和
+    # /api/chat 返回的 tool_calls（只数真正执行的）对不上——同一份运行两处口径互相矛盾。
+    executed: bool = True
 
 
 class Recorder:
@@ -55,7 +60,6 @@ class Recorder:
         self.steps: list[Step] = []
         self.started_at = time.time()
         self.error: str = ""
-        self.answer: str = ""
 
     # ---- 采集（graph 节点调用）----
     def add(self, step: Step) -> None:
@@ -71,7 +75,9 @@ class Recorder:
             # 按 node 区分而不是按 name：agent 节点记 name="llm"、tools 节点记具体工具名，
             # 用 name 判断等于"假设没有工具叫 llm"，将来加一个同名工具就会数错。
             "llm_calls": sum(1 for s in self.steps if s.node == "agent"),
-            "tool_calls": sum(1 for s in self.steps if s.node == "tools"),
+            # 只数**真正执行**的工具调用：被跳过的重复调用、未知工具、会话不可用
+            # 都会留下一条 tools 步，但它们没有派出去任何调用（见 Step.executed）。
+            "tool_calls": sum(1 for s in self.steps if s.node == "tools" and s.executed),
             "prompt_tokens": total_in,
             "completion_tokens": total_out,
             "total_tokens": total_in + total_out,

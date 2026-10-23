@@ -60,8 +60,12 @@ class BasicAuthMiddleware:
         if not sep:
             return False
         # 两个比较都做，避免用短路暴露"用户名是否存在"的时序差异。
-        user_ok = secrets.compare_digest(user, self.username)
-        pass_ok = secrets.compare_digest(password, self.password)
+        # 必须按 UTF-8 字节比较：hmac.compare_digest 对含非 ASCII 的 str 会抛
+        # TypeError（"comparing strings with non-ASCII characters is not supported"），
+        # 而 Basic 头本来就允许携带任意 UTF-8 内容（挑战头里也写了 charset="UTF-8"）。
+        # 直接比较 str 时，一个非 ASCII 用户名就能把未认证请求变成 500。
+        user_ok = secrets.compare_digest(user.encode("utf-8"), self.username.encode("utf-8"))
+        pass_ok = secrets.compare_digest(password.encode("utf-8"), self.password.encode("utf-8"))
         return user_ok and pass_ok
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

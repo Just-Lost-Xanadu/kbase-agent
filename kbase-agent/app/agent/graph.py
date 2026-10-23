@@ -30,6 +30,7 @@ from app.guardrails import (
     is_duplicate_call,
     truncate_tool_output,
 )
+from app.retrieval.loader import SUPPORTED_EXTS
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -69,13 +70,6 @@ except ImportError:  # pragma: no cover
     _TRANSPORT_ERRORS = ()
 
 
-class ToolSessionStale(RuntimeError):
-    """本次工具调用命中的是**已失效**会话：会话已被别的调用判死，需要重新派单。
-
-    调用方（tools_node）据此重取一次工具表再重试，而不是把这次失败算进 trace。
-    """
-
-
 class ToolSessionUnavailable(RuntimeError):
     """会话重建也失败了（子进程起不来、索引/依赖坏了）：如实报错，不抛给上层 502。"""
 
@@ -109,7 +103,7 @@ class McpToolSession:
     """常驻 MCP stdio 会话 + 工具表，带失效自愈。
 
     生命周期由 AgentRuntime 持有（`aclose()` 时释放）；`tools` 属性是当前有效工具表的快照，
-    调用方每次派单前用 `lease()` 现取一份——这样"工具表被整体换掉"不会让图里留着旧对象。
+    调用方每次派单前用 `ensure()` 现取一份租约——这样"工具表被整体换掉"不会让图里留着旧对象。
     """
 
     def __init__(self, connections: dict, session_factory=None):
@@ -128,20 +122,6 @@ class McpToolSession:
     @property
     def tools(self) -> list:
         return self._tools
-
-    def lease(self, generation: int | None) -> "_Lease | None":
-        """按调用方持有的 generation 取一份工具表。
-
-        - `generation is None`：调用方首次派单，拿当前的（没有就返回 None，由 ensure 去建）。
-        - generation 与当前一致：正常复用。
-        - generation 落后：说明会话在本次派单期间被判死并重建过（或正在重建）——
-          返回 None，让调用方 `ensure()` 之后重新取，避免继续用已被关闭的会话。
-        """
-        if not self._tools:
-            return None
-        if generation is None or generation == self._generation:
-            return _Lease(self._tools, self._generation, self._session)
-        return None
 
     async def ensure(self) -> "_Lease":
         """确保有一个可用会话，返回它的租约。已有效时是零开销（不加锁、不往返）。"""
@@ -250,14 +230,13 @@ def make_llm(temperature: float = 0.0) -> ChatOpenAI:
 
     未配置 key（缺失或仍是占位符 sk-your-key）时抛明确中文报错，避免带占位 key 悄悄调失败。
     .env 由 app.config 的 load_dotenv() 定位（从 app/config.py 所在目录向上查找，与 CWD 无关）；
-    但 CHROMA_PATH / CHECKPOINT_DB 是相对路径，因此仍建议从项目根（kbase-agent/）启动。
+    CHROMA_PATH / CHECKPOINT_DB 由 config._path() 按项目根归一成**绝对路径**，与启动目录无关。
     """
     if not settings.api_key or settings.api_key == "sk-your-key":
         raise ValueError(
             "未配置有效的 DEEPSEEK_API_KEY。请在项目根目录创建 .env"
             "（复制 .env.example 并填入真实 key，占位符 sk-your-key 不会被接受），"
             "或先执行：$env:DEEPSEEK_API_KEY='sk-真实key'。"
-            "注意 CHROMA_PATH / CHECKPOINT_DB 是相对路径，请从 kbase-agent 目录启动。"
         )
     return ChatOpenAI(
         model=settings.model_name,
@@ -318,7 +297,7 @@ def _parse_sources(messages: list) -> list[str]:
         for line in _text_of(message.content).splitlines():
             line = line.strip()
             if line.startswith(("【来源：", "【来源:")) and "】" in line:
-                source = line.split("】", 1)[0].split("：", 1)[-1].split(":", 1)[-1]
+                source = line.split("】", 1)[0].split("：", 1)[-1].split(":", 1)[-1].strip()
                 if source and source not in sources:
                     sources.append(source)
     return sources
@@ -347,8 +326,9 @@ def _retrieval_ran(messages: list) -> bool:
 
 _CITATION_RE = re.compile(r"【来源[：:]([^】]+)】")
 # 同一个【来源：…】括号内的多个文件名分隔符（模型会写"A、B、C"，也可能用逗号/分号/斜杠）
-# 与 app/retrieval/loader.SUPPORTED_EXTS 一致（有单测断言两者相等，防漂移）
-_SOURCE_EXTS: tuple[str, ...] = (".md", ".txt", ".docx", ".xlsx", ".pdf")
+# 扩展名清单**直接取自** app/retrieval/loader.SUPPORTED_EXTS：两处各写一份时，
+# 新增一种格式（比如 .pptx）只改一处，"引用是否真实存在"的判定就会悄悄漏掉它。
+_SOURCE_EXTS: tuple[str, ...] = tuple(sorted(SUPPORTED_EXTS))
 _CITATION_SPLIT = re.compile(r"[、,，;；/]+")
 _CITATION_BRACKETS = {"（": "）", "(": ")", "【": "】", "[": "]"}
 # 文件名后面常跟一句说明（「X.md（已核对）」）或句号。判据必须允许后缀，
@@ -694,6 +674,9 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
         rec: Recorder | None = get_recorder()
         last = state["messages"][-1]
         calls = getattr(last, "tool_calls", None) or []
+        # 从进入节点就开始计时：会话重建（拉起子进程 + 握手 + 冷加载）主要耗在下面那次
+        # ensure() 里，早退分支如果不记耗时，trace 里最慢的那几条会显示 0ms。
+        t_node = now_ms()
 
         # 拿一份"当前有效的工具表 + 会话代次"。工具表会随会话重建整体换掉，
         # 所以每次派单都现取，不能在编译期把工具对象存进闭包（那样会话一旦重建，
@@ -710,7 +693,8 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
         except TimeoutError:
             note = f"工具会话建立超时（>{AgentLimits.step_timeout_seconds}s）"
             if rec is not None:
-                rec.add(Step(node="tools", name="*", duration_ms=0, ok=False, note=note))
+                rec.add(Step(node="tools", name="*", duration_ms=now_ms() - t_node,
+                             ok=False, note=note, executed=False))
                 rec.error = note
             return {
                 "messages": [
@@ -727,7 +711,8 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
             # 不抛异常——抛出去会让 HTTP 层回 502，而模型其实还能基于历史信息作答。
             note = f"工具会话不可用：{exc}"[:300]
             if rec is not None:
-                rec.add(Step(node="tools", name="*", duration_ms=0, ok=False, note=note))
+                rec.add(Step(node="tools", name="*", duration_ms=now_ms() - t_node,
+                             ok=False, note=note, executed=False))
                 rec.error = note
             return {
                 "messages": [
@@ -830,6 +815,7 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                         )
                         item["ok"] = False
                         item["note"] = item["content"][:160]
+                        item["duration_ms"] = now_ms() - t0
                         return
                     except ToolSessionUnavailable as rebuild_exc:
                         item["content"] = (
@@ -838,12 +824,14 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
                         )
                         item["ok"] = False
                         item["note"] = item["content"][:160]
+                        item["duration_ms"] = now_ms() - t0
                         return
                     retry_tool = fresh.by_name.get(name)
                     if retry_tool is None:
                         item["content"] = f"工具 {name} 调用失败：会话重建后该工具已不存在"
                         item["ok"] = False
                         item["note"] = item["content"][:160]
+                        item["duration_ms"] = now_ms() - t0
                         return
                     try:
                         raw = await asyncio.wait_for(
@@ -887,7 +875,9 @@ def _build_graph(llm, tool_session: "McpToolSession", checkpointer):
             if rec is not None:
                 step = Step(node="tools", name=item["name"],
                             duration_ms=item.get("duration_ms", 0),
-                            ok=item["ok"], note=item["note"])
+                            ok=item["ok"], note=item["note"],
+                            # 跳过重复调用 / 未知工具：没有派出去任何调用，不能算进 tool_calls
+                            executed=item["tool"] is not None)
                 # trace 里要能看出"这一步到底调了哪把工具、什么参数"：原先 steps 只记 node/name，
                 # 排查时只能靠顺序猜（name 与 node 在旧数据里都是 "tools"）。
                 step.tool_calls = [item["name"]]
