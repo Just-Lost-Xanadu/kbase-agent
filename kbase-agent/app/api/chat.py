@@ -147,7 +147,9 @@ async def _save_trace(
     recorder_summary: dict,
     answer: str,
     sources: list[str],
-    retrieved_sources: list[str],
+    retrieved_sources: list[str] | None,
+    unverified_sources: list[str] | None,
+    tool_calls: int | None,
 ) -> None:
     """持久化一次运行的 trace（观测用，失败不影响回答）。"""
     from app import store
@@ -158,6 +160,8 @@ async def _save_trace(
         answer=answer,
         sources=sources,
         retrieved_sources=retrieved_sources,
+        unverified_sources=unverified_sources,
+        tool_calls=tool_calls,
     )
 
 
@@ -170,6 +174,13 @@ async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
     answer = (result or {}).get("answer", "")
     sources = (result or {}).get("sources", []) or []
     retrieved = (result or {}).get("retrieved_sources", []) or []
+    # result=None（失败/断连）时这两个字段传 None：SQL NULL 专门表示"本轮没有采集"，
+    # 不要写成 [] ——那会被消费方误读成"查过且的确为空"。
+    unverified = (
+        (result or {}).get("unverified_sources", []) or []
+        if result is not None else None
+    )
+    tool_calls = (result or {}).get("tool_calls", 0) if result is not None else None
     # 有 result 但 answer 是空白：graph._final_answer 在"本轮 AI 消息 content 为空"时
     # 刻意返回空串（不许回退到上一轮答案）。这种轮次不该进会话记录——否则历史里就出现了
     # 本函数 docstring 声明不会出现的"只有问题没有答案"，前端预览也会是空串。
@@ -179,7 +190,9 @@ async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
         except Exception:  # noqa: BLE001, S110
             pass
     try:
-        await _save_trace(req, rec.summarize(), answer, sources, retrieved)
+        await _save_trace(
+            req, rec.summarize(), answer, sources, retrieved, unverified, tool_calls
+        )
     except Exception:  # noqa: BLE001, S110
         pass
 

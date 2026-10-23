@@ -42,9 +42,11 @@ CREATE TABLE IF NOT EXISTS run_traces (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id TEXT,
     question        TEXT,
-    answer          TEXT,
-    sources         TEXT,
-    steps           TEXT,
+    answer        TEXT,
+    sources       TEXT,
+    unverified_sources TEXT,
+    tool_calls    INTEGER,
+    steps         TEXT,
     prompt_tokens   INTEGER DEFAULT 0,
     completion_tokens INTEGER DEFAULT 0,
     total_tokens    INTEGER DEFAULT 0,
@@ -62,6 +64,10 @@ CREATE INDEX IF NOT EXISTS idx_run_traces_started ON run_traces(started_at);
 # 两者是不同口径（见 app/agent/graph.py 的 _parse_citations 说明），不能共用一列。
 MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("run_traces", "retrieved_sources", "ALTER TABLE run_traces ADD COLUMN retrieved_sources TEXT"),
+    # trace 也要能审计「查无此据」与本轮实际执行了几次工具：否则同一次运行，
+    # /api/chat 与 messages 有这两个字段，/api/runs 却查不到，观测口径不一致。
+    ("run_traces", "unverified_sources", "ALTER TABLE run_traces ADD COLUMN unverified_sources TEXT"),
+    ("run_traces", "tool_calls", "ALTER TABLE run_traces ADD COLUMN tool_calls INTEGER"),
     # 历史消息也要带上引用可验证性字段：否则刷新页面后，"查无此据"的红色提示
     # 会消失，同一条编造引用在实时响应与历史里显示成两个样子。
     ("messages", "retrieved_sources", "ALTER TABLE messages ADD COLUMN retrieved_sources TEXT"),
@@ -73,8 +79,9 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
 # 都会让取值整体错位或直接 KeyError。这里改成显式列出，加列时必须同步改这里。
 TRACE_COLUMNS = (
     "id", "conversation_id", "question", "answer", "sources", "retrieved_sources",
-    "steps", "prompt_tokens", "completion_tokens", "total_tokens",
-    "cost_cny", "duration_ms", "error", "started_at",
+    "unverified_sources", "tool_calls", "steps", "prompt_tokens",
+    "completion_tokens", "total_tokens", "cost_cny", "duration_ms",
+    "error", "started_at",
 )
 
 
@@ -249,20 +256,24 @@ async def save_trace(
     answer: str,
     sources: list[str],
     retrieved_sources: list[str] | None = None,
+    unverified_sources: list[str] | None = None,
+    tool_calls: int | None = None,
 ) -> None:
     """持久化一次 Agent 运行的 trace（观测用，与消息记录互不影响）。
 
-    sources / retrieved_sources 是两个口径（答案引用 vs 检索命中），分别入列，不合并。
+    sources / retrieved_sources / unverified_sources 是三个口径
+    （答案引用 / 检索命中 / 查无此据），分别入列，不合并。
     """
     db = await _conn()
     try:
         await db.execute(
             """
             INSERT INTO run_traces
-                (conversation_id, question, answer, sources, retrieved_sources, steps,
+                (conversation_id, question, answer, sources, retrieved_sources,
+                 unverified_sources, tool_calls, steps,
                  prompt_tokens, completion_tokens, total_tokens,
                  cost_cny, duration_ms, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 conversation_id,
@@ -273,6 +284,9 @@ async def save_trace(
                 # 这样 API 消费方可以按 null / [] 区分两代口径（README 的判据）。
                 json.dumps(retrieved_sources, ensure_ascii=False)
                 if retrieved_sources is not None else None,
+                json.dumps(unverified_sources, ensure_ascii=False)
+                if unverified_sources is not None else None,
+                tool_calls,
                 json.dumps(recorder_summary.get("steps", []), ensure_ascii=False),
                 recorder_summary.get("prompt_tokens", 0),
                 recorder_summary.get("completion_tokens", 0),
@@ -340,13 +354,13 @@ async def get_trace(trace_id: int) -> dict | None:
             data[key] = json.loads(data[key]) if data[key] else []
         except (json.JSONDecodeError, TypeError):
             data[key] = []
-    # retrieved_sources 的 SQL NULL 有专门语义：旧数据没有采集这个字段。
-    # 全部抹成 [] 会让 README 承诺的"按 null 区分旧数据"失效。
-    if data["retrieved_sources"] is None:
-        data["retrieved_sources"] = None
-    else:
+    # retrieved_sources / unverified_sources 的 SQL NULL 有专门语义：旧数据没有采集
+    # 这个字段。全部抹成 [] 会让 README 承诺的"按 null 区分旧数据"失效。
+    for key in ("retrieved_sources", "unverified_sources"):
+        if data[key] is None:
+            continue
         try:
-            data["retrieved_sources"] = json.loads(data["retrieved_sources"])
+            data[key] = json.loads(data[key])
         except (json.JSONDecodeError, TypeError):
-            data["retrieved_sources"] = []
+            data[key] = []
     return data

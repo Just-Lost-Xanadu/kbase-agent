@@ -297,9 +297,14 @@ def _parse_sources(messages: list) -> list[str]:
         for line in _text_of(message.content).splitlines():
             line = line.strip()
             if line.startswith(("【来源：", "【来源:")) and "】" in line:
-                source = line.split("】", 1)[0].split("：", 1)[-1].split(":", 1)[-1].strip()
-                if source and source not in sources:
-                    sources.append(source)
+                raw = line.split("】", 1)[0].split("：", 1)[-1].split(":", 1)[-1]
+                # 工具输出也可能把多篇写进同一个【来源：】括号（与答案正文同一种写法）。
+                # 不拆开的话，retrieved_sources 里会出现 "A.md、B.md" 这个复合串，
+                # 而答案里的 A.md / B.md 都匹配不上，全部被误判成「查无此据」。
+                for source in _split_citation_names(raw):
+                    source = source.strip()
+                    if source and source not in sources:
+                        sources.append(source)
     return sources
 
 
