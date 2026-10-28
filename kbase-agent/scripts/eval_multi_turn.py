@@ -122,7 +122,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条（0=全量）")
     parser.add_argument("--verbose", action="store_true", help="打印每轮问答")
-    return asyncio.run(main_async(parser.parse_args()))
+    args = parser.parse_args()
+    if args.limit < 0:
+        # 负数不是"全量"：cases[:-1] 会静默少跑最后一条，和 eval_e2e 里修过的
+        # "--limit -3 被当成全量" 是同一类问题，入口直接拒绝。
+        raise SystemExit(f"--limit 必须 >= 0（0 表示全量），收到 {args.limit}")
+    return asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
