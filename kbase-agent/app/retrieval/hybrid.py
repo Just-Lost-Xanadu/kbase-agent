@@ -39,8 +39,10 @@ class Reranker:
         # 反而更容易 500"——与它要解决问题的方向正好相反。
         if isinstance(scores, (int, float)):
             scores = [float(scores)]
+        # strict=True：reranker 返回的分数必须与候选一一对应。静默截断会让
+        # "候选 5 条、分数 3 条"变成只重排前 3 条，而且没有任何报错。
         ranked = sorted(
-            zip(candidates, scores), key=lambda pair: pair[1], reverse=True
+            zip(candidates, scores, strict=True), key=lambda pair: pair[1], reverse=True
         )[:top_k]
         return [
             {**candidate, "score": round(float(score), 4)} for candidate, score in ranked

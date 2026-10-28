@@ -347,7 +347,9 @@ async def get_trace(trace_id: int) -> dict | None:
         await db.close()
     if row is None:
         return None
-    data = dict(zip(TRACE_COLUMNS, row))
+    # strict=True：列清单与 SELECT 结果必须等长。静默截断/错位会让 trace 字段
+    # 整体偏移，而且查出来"有值"，比直接报错更难发现。
+    data = dict(zip(TRACE_COLUMNS, row, strict=True))
     data["cost_cny"] = round(data["cost_cny"] or 0.0, 4)
     for key in ("sources", "steps"):
         try:
