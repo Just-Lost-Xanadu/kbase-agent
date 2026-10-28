@@ -112,9 +112,14 @@ python scripts/eval_e2e.py --reanalyze --tag corpus-v2   # 只重算这一份报
 python scripts/eval_e2e.py --reanalyze --all     # 批量重算（会就地改写全部报告，先备份）
 python scripts/demo_agent.py "张三还剩几天年假？"  # 命令行跑一遍完整 Agent
 python scripts/eval_e2e.py --limit 5     # 端到端回归（真实调 API，判回答/引用/成本）
+python scripts/eval_multi_turn.py        # 多轮 / 工具边界冒烟（不并入 60 条分母）
 ```
 
-> 前三条（建索引、检索层评测、报告重算）**不需要 API key**；只有 Agent 对话与端到端评测需要。
+> 前三条（建索引、检索层评测、报告重算）**不需要 API key**；只有 Agent 对话、端到端评测与多轮冒烟需要。
+>
+> **CI**：`.github/workflows/ci.yml` 在每次 push/PR 跑 `pytest` + 离线检索评测，并断言
+> `topk_hit_rate` / `citation_accuracy` ≥ 0.95。配置仓库 secret `DEEPSEEK_API_KEY` 后，
+> 会额外跑 5 条端到端与 2 条多轮冒烟；没配 secret 时这两步自动跳过，不影响主链路绿灯。
 > `--reanalyze` 是纯离线分析：per-case 里已存着 duration_ms/token/cost 明细，指标口径变化不必重花钱重跑。
 
 网页对话：启动服务后浏览器打开 **http://127.0.0.1:8000** 即聊（`static/index.html` 单文件页面，无构建、无依赖）。页面走 **SSE 节点级流式（`/api/chat/stream`）**，提问后可见 Agent 逐步工具调用（检索→查库）与最终回答。左侧会话栏可**新建 / 回看 / 切换历史会话**：消息与 checkpoint 落 `data/checkpoints.sqlite`，刷新页面甚至重启服务后仍能恢复并继续对话。
