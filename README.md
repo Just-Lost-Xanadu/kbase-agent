@@ -24,7 +24,10 @@
 - **评测闭环**：自建 **60 条金标两层 Harness**——检索层（离线零成本）+ 端到端回归层
   （回答率 / 检索口径引用覆盖 / **答案引用口径** / 答案关键词覆盖率 / **应拒答通过率** / 成本与 p50·p95），
   金标含**单源 / 多跳 / 冲突 / 应拒答**四类，支持 `--tag` 落报告、`--compare` 基线 diff、
-  `--reanalyze` 离线重算指标。实测报告在 [`kbase-agent/docs/eval-reports/`](./kbase-agent/docs/eval-reports/)。
+  `--reanalyze` 离线重算指标；另有 **4 条多轮/工具边界冒烟**（追问、未给姓名、切换员工、查无此人，
+  不并入 60 条分母）。实测报告在 [`kbase-agent/docs/eval-reports/`](./kbase-agent/docs/eval-reports/)。
+- **CI 门禁**：`.github/workflows/ci.yml` 跑 `pytest` + 离线检索评测（`topk_hit_rate` /
+  `citation_accuracy` ≥ 0.95）；配 `DEEPSEEK_API_KEY` 后追加端到端与多轮冒烟。
 - **参数消融可一条命令复现**：检索路（`--route`）、`top_k`（`--sweep-k`）、切分粒度
   （`--sweep-chunk-size`，会重建索引并在跑完后自动恢复默认值）都有开关。切分粒度那张表给出了一个
   具体结论：**块越大，向量路单调变差（0.9643→0.8214），而 BM25 几乎不动**——两条路的失效模式不同，

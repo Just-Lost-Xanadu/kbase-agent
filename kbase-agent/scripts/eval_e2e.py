@@ -435,7 +435,7 @@ def reanalyze(tag: str | None = None, all_reports: bool = False) -> None:
     """离线重算报告里的指标（不调 API、不需要 key）。
 
     **只重算显式指定的报告**（`--tag X` 或 `--all`）：这个函数会**就地改写**报告文件，
-    而 docs/eval-reports/ 里放的是历史基线。原先它 `glob("*.json")` 无差别重写全部 6 份，
+    而 docs/eval-reports/ 里放的是历史基线。原先它 `glob("*.json")` 无差别重写全部报告，
     于是"改一次金标口径、顺手跑一次 --reanalyze"就会把历史证据悄悄改掉——这与 README
     "报告可被 --compare 引用"的用法直接冲突。所以默认改成"必须点名"，批量要显式 --all。
 
