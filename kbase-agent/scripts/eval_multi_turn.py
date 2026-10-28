@@ -119,6 +119,13 @@ async def main_async(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    # 与 eval_e2e.py 同口径：Windows 终端默认编码未必是 UTF-8，中文答案/汇总
+    # 直接 print 可能乱码或 UnicodeEncodeError。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条（0=全量）")
     parser.add_argument("--verbose", action="store_true", help="打印每轮问答")
