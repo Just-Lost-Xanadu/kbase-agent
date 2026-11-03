@@ -108,5 +108,10 @@ async def ensure_services(app: FastAPI):
         # shield：调用方被取消时只放弃等待，初始化 task 照常跑完
         return await asyncio.shield(task)
     except Exception:
-        app.state.services_task = None   # 失败清空，下一次请求重新初始化
+        # 只清"自己等待的那个 task"。多个等待者同时失败时，若其中一个已经被下一个
+        # 请求换成了新 task，旧等待者无条件置 None 会把新 task 抹掉，导致下一次
+        # 请求再建第三个 task —— 单飞初始化失效，两个 index() 并发 reset/add。
+        async with lock:
+            if getattr(app.state, "services_task", None) is task:
+                app.state.services_task = None
         raise

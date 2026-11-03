@@ -38,6 +38,15 @@ class VectorStore:
                 metadata={"hnsw:space": "cosine"},
             )
 
+    def invalidate_cache(self) -> None:
+        """丢弃当前 collection 句柄（不删数据），下次访问重新 get_or_create。
+
+        服务运行期间外部重建索引（index_docs.py / eval.py --sweep-chunk-size）时，
+        旧句柄可能指向已被删除的 collection；上层检测到 sidecar 变化后调用这里，
+        让检索重新拿到新 collection，而不是继续查旧向量。
+        """
+        self._collection = None
+
     def reset(self) -> None:
         """删掉整个 collection（全量重建索引前调用）。
 

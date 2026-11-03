@@ -33,11 +33,23 @@ class RetrievalPipeline:
         self.reranker = Reranker() if settings.rerank_enabled else None
         self._bm25: BM25Index | None = None
         self._ready = False
+        # 当前内存索引对应的 sidecar 指纹（mtime_ns + size）。
+        # 服务是长驻进程、MCP 子进程也是长驻的：运行期间外部重建索引后，
+        # 若不检查这个指纹，进程会一直用启动时读进来的旧 BM25 / 旧 collection。
+        self._index_sig: tuple[int, int] | None = None
 
     # ---- 索引存取 -------------------------------------------------------
     @staticmethod
     def _sidecar_path() -> Path:
         return Path(settings.chroma_path) / "chunks.jsonl"
+
+    @classmethod
+    def _sidecar_signature(cls) -> tuple[int, int] | None:
+        try:
+            st = cls._sidecar_path().stat()
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
 
     def _load_chunks(self) -> list[dict] | None:
         """读 sidecar 解析成分块列表；**任何解析失败都返回 None**（视为"没有可用索引"）。
@@ -96,7 +108,16 @@ class RetrievalPipeline:
     def ensure_ready(self, auto_index: bool = False) -> None:
         """懒加载已有索引；auto_index=True 时若缺失则自动建索引（首次含模型下载）。"""
         if self._ready:
-            return
+            # 外部重建索引（另一个进程写了新的 chunks.jsonl）后，内存里的 BM25 与
+            # Chroma collection 句柄都可能已经过期。sidecar 指纹变化即视为"索引换代"，
+            # 丢弃缓存后按下面的正常流程重新加载。
+            if self._sidecar_signature() == self._index_sig:
+                return
+            self._ready = False
+            self._bm25 = None
+            invalidate = getattr(self.vector_store, "invalidate_cache", None)
+            if callable(invalidate):
+                invalidate()
         chunks = self._load_chunks()
         if chunks:
             count = self.vector_store.count()
@@ -113,6 +134,7 @@ class RetrievalPipeline:
                     "请重跑 python scripts/index_docs.py"
                 )
             self._bm25 = BM25Index(chunks)
+            self._index_sig = self._sidecar_signature()
             self._ready = True
             return
         if auto_index:
@@ -206,6 +228,7 @@ class RetrievalPipeline:
                     sidecar.unlink()
             raise
         self._bm25 = BM25Index(chunks)
+        self._index_sig = self._sidecar_signature()
         self._ready = True
         print(
             f"[index] {len(documents)} 篇文档 -> {len(chunks)} 个分块 "

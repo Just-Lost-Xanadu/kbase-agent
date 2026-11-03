@@ -103,7 +103,14 @@ async def init_db() -> None:
             existing = {row[1] for row in await cur.fetchall()}
             await cur.close()
             if column not in existing:
-                await db.execute(ddl)
+                try:
+                    await db.execute(ddl)
+                except sqlite3.OperationalError as exc:
+                    # 多 worker / 多容器同时启动并命中共用旧库时，双方都可能先看到
+                    # "列缺失"，后执行 ALTER 的一方会收到 duplicate column。
+                    # 这说明迁移已经由另一个进程完成，视为成功而不是启动失败。
+                    if "duplicate column" not in str(exc).lower():
+                        raise
         await db.commit()
     finally:
         await db.close()

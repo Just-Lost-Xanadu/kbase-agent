@@ -48,7 +48,7 @@ ROUTE_LABELS = {"vector": "仅向量", "bm25": "仅 BM25", "hybrid": "RRF"}
 def load_cases() -> list[dict]:
     return [
         json.loads(line)
-        for line in EVAL_FILE.read_text(encoding="utf-8").splitlines()
+        for line in EVAL_FILE.read_text(encoding="utf-8-sig").splitlines()
         if line.strip()
     ]
 
@@ -123,11 +123,20 @@ def run(
     return summary
 
 
+def _write_json_rows(rows: list[dict], json_path: str | None) -> None:
+    if not json_path:
+        return
+    Path(json_path).write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def sweep(
     pipeline=None,
     cases: list[dict] | None = None,
     ks=(1, 2, 3, 5),
     verbose: bool = True,
+    json_path: str | None = None,
 ) -> list[dict]:
     """三条检索路 × 多个 top_k 的扫描表（README「检索路消融 / top-k 扫描」的来源）。
 
@@ -156,6 +165,7 @@ def sweep(
         best_single = max(raw["vector"], raw["bm25"])
         row["rrf_minus_best_single"] = round(raw["hybrid"] - best_single, 4)
         rows.append(row)
+    _write_json_rows(rows, json_path)
     if verbose:
         print(f"\n== top-k 扫描（scored {len(scored)} 条有真值用例；差值为负表示融合不如单路）==")
         print(f"  {'top_k':<7}{'仅向量':<11}{'仅 BM25':<11}{'RRF':<11}RRF-单路最好")
@@ -174,6 +184,7 @@ def sweep_chunk_size(
     source_dir: str | Path | None = None,
     restore: bool = True,
     verbose: bool = True,
+    json_path: str | None = None,
 ) -> list[dict]:
     """三条检索路 × 多个 chunk_size 的扫描表（README「chunk_size 扫描」的来源）。
 
@@ -221,6 +232,7 @@ def sweep_chunk_size(
             RetrievalPipeline().index(source_dir, chunk_size=DEFAULT_CHUNK_SIZE)
             if verbose:
                 print(f"\n  已把索引恢复为默认 chunk_size={DEFAULT_CHUNK_SIZE}")
+    _write_json_rows(rows, json_path)
     if verbose:
         print(f"\n== chunk_size 扫描（scored {len(scored)} 条有真值用例，top_k={top_k}）==")
         print(f"  {'chunk_size':<12}{'分块数':<9}{'仅向量':<11}{'仅 BM25':<11}RRF")
@@ -298,11 +310,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--top-k 必须 > 0，收到 {args.top_k}")
     if args.sweep_k:
         ks = _positive_ints(args.ks, "--ks")
-        sweep(ks=ks)
+        sweep(ks=ks, json_path=args.json_path)
         return 0
     if args.sweep_chunk_size:
         sizes = _positive_ints(args.sizes, "--sizes")
-        sweep_chunk_size(sizes=sizes, top_k=args.top_k)
+        sweep_chunk_size(
+            sizes=sizes, top_k=args.top_k, json_path=args.json_path
+        )
         return 0
     run(route=args.route, top_k=args.top_k, json_path=args.json_path)
     return 0

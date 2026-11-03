@@ -93,7 +93,7 @@ def _load_cases() -> list[dict]:
     # scripts/eval.py 的同类函数一直是跳过空行的，这里漏了。
     return [
         json.loads(line)
-        for line in EVAL_FILE.read_text(encoding="utf-8").splitlines()
+        for line in EVAL_FILE.read_text(encoding="utf-8-sig").splitlines()
         if line.strip()
     ]
 

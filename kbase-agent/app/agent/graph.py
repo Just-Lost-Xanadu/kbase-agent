@@ -325,6 +325,11 @@ def _retrieval_ran(messages: list) -> bool:
         head = text[:120]
         if "调用超时" in head or "调用失败" in head or "工具暂时不可用" in head:
             continue
+        # 上一条 AI 的 tool_call 被取消时补的占位消息**不是**一次成功检索。
+        # 若不排除，它会让下一轮"其实没检索"被当成"检索了但 0 命中"，
+        # 从而把答案里的所有引用误判成「查无此据」。
+        if "在完成前被中断" in head:
+            continue
         return True
     return False
 
@@ -932,6 +937,18 @@ class AgentRuntime:
         self._saver = saver
         self._conn = conn
         self._tool_session = tool_session
+        # 同一 thread 的请求必须串行：LangGraph 的 checkpoint 是"读快照 → 跑图 → 写回"，
+        # 两个并发请求都基于同一份旧快照追加消息时，后写会覆盖先写，答案/消息静默丢失，
+        # `fresh = messages[prior:]` 还可能把两次运行的消息混在一起。
+        # 不同 thread（不同会话）仍然完全并发。
+        self._thread_locks: dict[str, asyncio.Lock] = {}
+
+    def _thread_lock(self, thread_id: str) -> asyncio.Lock:
+        lock = self._thread_locks.get(thread_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._thread_locks[thread_id] = lock
+        return lock
 
     def _config(self, session_id: str | None) -> dict:
         return {
@@ -982,16 +999,20 @@ class AgentRuntime:
         return lc_messages, config, len(prior_messages)
 
     async def ainvoke(self, messages: list[dict], session_id: str | None = None) -> dict:
-        lc_messages, config, prior = await self._build_input(messages, session_id)
-        # tool_call_count 每轮显式置 0：它是"本轮"执行数，不能沿用 checkpoint 里的上一轮值。
-        state = await self.graph.ainvoke(
-            {"messages": lc_messages, "tool_call_count": 0}, config=config
-        )
-        final_messages = state["messages"]
-        # 答案与来源都只从本轮新增的消息里取：
-        # sources 不累计历史轮次；answer 也不回退到上一轮（见 _final_answer 说明）
-        fresh = final_messages[prior:]
-        return self._result(fresh, state.get("tool_call_count", 0))
+        # 先确定 thread_id，再拿它的锁：同一线程必须把"读 checkpoint → 跑图 → 取最终状态"
+        # 整段串行化，否则并发请求会互相覆盖 checkpoint（见 __init__ 的说明）。
+        thread_id = session_id or uuid.uuid4().hex
+        async with self._thread_lock(thread_id):
+            lc_messages, config, prior = await self._build_input(messages, thread_id)
+            # tool_call_count 每轮显式置 0：它是"本轮"执行数，不能沿用 checkpoint 里的上一轮值。
+            state = await self.graph.ainvoke(
+                {"messages": lc_messages, "tool_call_count": 0}, config=config
+            )
+            final_messages = state["messages"]
+            # 答案与来源都只从本轮新增的消息里取：
+            # sources 不累计历史轮次；answer 也不回退到上一轮（见 _final_answer 说明）
+            fresh = final_messages[prior:]
+            return self._result(fresh, state.get("tool_call_count", 0))
 
     @staticmethod
     def _result(fresh: list, tool_call_count: int | None = None) -> dict:
@@ -1034,19 +1055,23 @@ class AgentRuntime:
 
     async def astream(self, messages: list[dict], session_id: str | None = None):
         """按 super-step 产出 (node, state_update) 增量，供 SSE 逐步下发。"""
-        lc_messages, config, prior = await self._build_input(messages, session_id)
-        async for update in self.graph.astream(
-            {"messages": lc_messages, "tool_call_count": 0},
-            config=config,
-            stream_mode="updates",
-        ):
-            yield update
-        # 图跑完后从 checkpoint 取最终状态，避免再跑一次
-        snapshot = await self.graph.aget_state(config)
-        values = snapshot.values or {}
-        final_messages = values.get("messages", [])
-        # 与 ainvoke 同口径：答案与来源都只看本轮新增消息
-        yield self._result(final_messages[prior:], values.get("tool_call_count", 0))
+        thread_id = session_id or uuid.uuid4().hex
+        # 与 ainvoke 同口径：整条流式运行期间持有该 thread 的锁。
+        # 客户端断连时 async for 被取消，async with 会正常释放锁。
+        async with self._thread_lock(thread_id):
+            lc_messages, config, prior = await self._build_input(messages, thread_id)
+            async for update in self.graph.astream(
+                {"messages": lc_messages, "tool_call_count": 0},
+                config=config,
+                stream_mode="updates",
+            ):
+                yield update
+            # 图跑完后从 checkpoint 取最终状态，避免再跑一次
+            snapshot = await self.graph.aget_state(config)
+            values = snapshot.values or {}
+            final_messages = values.get("messages", [])
+            # 与 ainvoke 同口径：答案与来源都只看本轮新增消息
+            yield self._result(final_messages[prior:], values.get("tool_call_count", 0))
 
     async def aclose_thread(self, session_id: str) -> None:
         """删掉某个 session 的 checkpoint 线程（评测/回归专用）。

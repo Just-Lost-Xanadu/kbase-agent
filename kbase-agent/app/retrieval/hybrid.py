@@ -26,9 +26,11 @@ class Reranker:
 
     def rerank(self, query: str, candidates: list[dict], top_k: int = 3) -> list[dict]:
         """对候选按与 query 的相关性重排，返回重新排序后的 top_k 条。"""
-        self._ensure_model()
+        # 先判空再加载模型：0 命中时没有东西可重排，不应该为此加载几 GB 的
+        # FlagReranker；更不该在未安装可选依赖时把"本来能返回空结果"变成工具报错。
         if not candidates:
             return []
+        self._ensure_model()
         pairs = [[query, c["content"]] for c in candidates]
         scores = self.model.compute_score(pairs)
         if hasattr(scores, "tolist"):  # numpy

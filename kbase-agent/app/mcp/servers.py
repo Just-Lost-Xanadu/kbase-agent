@@ -102,7 +102,9 @@ def _load_records() -> list[dict]:
         return _records_cache[1]
 
     try:
-        text = path.read_text(encoding="utf-8")
+        # utf-8-sig：Windows 记事本保存的 "UTF-8 with BOM" 会在第一行 JSON 前留
+        # \ufeff，导致首条记录被当成坏行跳过（用户看到的是"查无此人"）。
+        text = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError) as exc:
         # 面向用户可编辑的数据文件：除了坏 JSON 行，还可能被存成 GBK/ANSI
         # （Windows 记事本默认编码就可能是 ANSI）。此前这里直接抛 UnicodeDecodeError，

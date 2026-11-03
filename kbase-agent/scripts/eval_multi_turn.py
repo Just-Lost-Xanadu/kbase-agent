@@ -36,7 +36,7 @@ CASES_FILE = ROOT / "eval" / "multi_turn.jsonl"
 
 def load_cases(path: Path = CASES_FILE) -> list[dict]:
     cases = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         if line.strip():
             cases.append(json.loads(line))
     return cases

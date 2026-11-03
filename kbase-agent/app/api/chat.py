@@ -89,8 +89,14 @@ def _question_of(req: ChatRequest) -> str:
 
     同一段逻辑原先在 _record_turn 里重复了一份，现统一走这里，避免两处口径漂移。
     """
+    # 取最后一条**非空** user 消息：校验允许"前面有真实问题、最后一条 user 是空白"
+    # 的批量请求，但会话标题/trace.question 不能因此记成空白。
     return next(
-        (m.content for m in reversed(req.messages) if m.role in {"user", "human"}),
+        (
+            m.content
+            for m in reversed(req.messages)
+            if m.role in {"user", "human"} and m.content.strip()
+        ),
         "",
     )
 

@@ -1,4 +1,4 @@
-"""文档解析：把 data/docs 下支持的格式统一抽取为纯文本/Markdown。
+﻿"""文档解析：把 data/docs 下支持的格式统一抽取为纯文本/Markdown。
 
 支持：.md / .txt（UTF-8 直读）、.docx / .xlsx / .pdf（文本层抽取）。
 文件名以 `_` 开头视为说明文件，不参与建索引。
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def _extract_plain_text(path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8").strip()
+        return path.read_text(encoding="utf-8-sig").strip()
     except (UnicodeDecodeError, OSError):
         return None
 
@@ -161,3 +161,4 @@ def load_documents(source_dir: str | Path) -> list[dict]:
     if not documents:
         raise ValueError(f"目录下没有可解析的文档: {root}")
     return documents
+
