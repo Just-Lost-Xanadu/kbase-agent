@@ -1,6 +1,6 @@
 # kbase-agent
 
-> **测试口径（2026-11-03 复核）**：`pytest -q` → kbase-agent **40 passed**、ecommerce-dw **32 passed**、mcp-tools **30 passed**，合计 **102**。README 内的历史段落保留更早版本的 77/51/38、60/40/30、49/36/30。
+> **测试口径（2026-11-08 复核）**：`pytest -q` → kbase-agent **40 passed**、ecommerce-dw **32 passed**、mcp-tools **30 passed**，合计 **102**。README 内的历史段落保留更早版本的 77/51/38、60/40/30、49/36/30。
 
 **企业知识库 + 工具调用 Agent（单 Agent）**：基于 LangGraph 的 ReAct 式工具循环，RAG 检索与业务工具经 **MCP 协议真接入**（stdio）；配**两层评测 Harness**（60 条金标：检索层 + 端到端回归，含多跳/冲突/应拒答三类难例）、SQLite 会话持久化、trace/成本可观测与护栏。
 
@@ -530,7 +530,7 @@ flowchart TD
   **同名去重与"子串匹配"的边界（如实说明）**：`matched_names` 现在按姓名去重，所以库里同一姓名有两条记录时不会再被误判成"问题里有多个姓名"而拒绝（重复行属于数据问题，交给数据侧修）；但身份匹配仍是**子串匹配**（`r["name"] in question`），因此存在误伤——问题里出现"张伟明"会命中员工"张伟"。生产化方向是实体抽取 + 唯一 ID，而不是子串包含。
   生产化方向：由会话层注入 `user_id` 并做行级过滤，而不是相信模型传进来的文本。**不对外宣称具备权限控制。**
 - 检索内容直接进 prompt，未做"不可信数据"隔离，因此 prompt 注入属于未防护面（列为方向）。
-- 同一 session 的**并发**请求未做串行保护：LangGraph 状态按 `thread_id` 记，同 thread 并发属"后写覆盖"（多路并发不会报错，但两轮谁先落地不保证）。生产化需按 session 串行或进队列。
+- **同一 session 的并发请求已按 `thread_id` 串行**（`runtime._thread_lock`）：LangGraph 的 checkpoint 是"读快照 → 跑图 → 写回"，同 thread 并发会让后写覆盖先写、消息静默丢失；现在把"读 checkpoint → 跑图 → 取最终状态"整段放进同一把 per-thread 锁，不同 session 仍完全并发。边界仍在单进程内：多副本部署时这把锁不跨进程，需要换 Postgres checkpointer 并按 session 串行/入队。
 - 多轮对话历史目前全量进上下文（checkpoint 保存全量消息）；超长会话建议后续加历史压缩/裁剪（如 summarize 节点或 max_turns 截断），列为方向。
 - 架构边界明确：当前是**单 Agent + MCP 工具层**；多 Agent 编排 / Skills / 工具失败重试与降级 / prompt 注入防护 / 鉴权限流 都**未实现**，只作为后续方向，不写进"已完成"能力。
 
