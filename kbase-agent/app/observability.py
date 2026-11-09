@@ -107,4 +107,10 @@ def estimate_cost(prompt_tokens: int, completion_tokens: int) -> float:
 
 
 def now_ms() -> int:
-    return int(time.time() * 1000)
+    """单调时钟毫秒数，**只用于算差值（耗时）**。
+
+    不用 `time.time()`：它是墙钟，NTP 回拨/手动校时会让 `later - earlier` 变成负数，
+    步骤耗时就出现"−1200ms"这种值，p50/p95 统计跟着失真。`time.monotonic()` 保证
+    差值恒非负；需要给人看的绝对时间由数据库的 `started_at`（`datetime('now')`）负责。
+    """
+    return int(time.monotonic() * 1000)

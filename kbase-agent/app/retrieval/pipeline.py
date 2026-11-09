@@ -95,15 +95,28 @@ class RetrievalPipeline:
         return chunks or None
 
     def is_indexed(self) -> bool:
+        """是否已有可用索引（sidecar 可读且向量数 == 分块数）。
+
+        **读向量数用 `count_strict()`（读失败上抛），不用宽松的 `count()`**：
+        `is_indexed()` 的 False 会触发 `index()`，而 `index()` 会先 unlink sidecar、
+        再 reset collection。Chroma 瞬时读不出来（另一个进程持锁、卷抖动）被当成
+        "索引不存在"，就从一个可恢复的读失败升级成**索引被删**，服务只能从零重建。
+        所以"文件读不出来"仍然返回 False（那条路径已经区分得很清楚，见 _load_chunks），
+        但"向量库读不出来"必须上抛，由上层按"暂时不可用"处理。
+
+        `count_strict` 用 getattr 兜底是为了兼容测试替身（FakeStore 只有 count()）。
+        """
         try:
             chunks = self._load_chunks()
-            if chunks is None:
-                return False
-            # 数量必须一致：只查 count>0 时，"旧 sidecar + reset 后只写入一半向量"
-            # 会被误判为可用，向量路与 BM25 路从此各查各的。
-            return self.vector_store.count() == len(chunks)
-        except Exception:  # noqa: BLE001  # 任何读取失败都等价于“没有索引”，交给上层自动重建（见 _load_chunks 说明）
+        except Exception:  # noqa: BLE001  # sidecar 损坏等价于"没有索引"，交给上层自动重建
             return False
+        if chunks is None:
+            return False
+        # 数量必须一致：只查 count>0 时，"旧 sidecar + reset 后只写入一半向量"
+        # 会被误判为可用，向量路与 BM25 路从此各查各的。
+        strict = getattr(self.vector_store, "count_strict", None)
+        count = strict() if callable(strict) else self.vector_store.count()
+        return count == len(chunks)
 
     def ensure_ready(self, auto_index: bool = False) -> None:
         """懒加载已有索引；auto_index=True 时若缺失则自动建索引（首次含模型下载）。"""

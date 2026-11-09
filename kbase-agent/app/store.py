@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS messages (
     retrieved_sources TEXT,
     tool_calls      INTEGER,
     unverified_sources TEXT,
+    -- 同一轮的两个显式排序/幂等键（见下方 INDEXES 与 save_turn 的说明）：
+    --   turn_seq   本轮在请求到达时分配的全局递增序号，用来给历史消息定序
+    --              （并发时"写入数据库的先后"与"用户发起的先后"可能相反）；
+    --   request_id 客户端提供的幂等键，重试/重发时靠它去重。
+    turn_seq        INTEGER,
+    request_id      TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id);
@@ -73,7 +79,20 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("messages", "retrieved_sources", "ALTER TABLE messages ADD COLUMN retrieved_sources TEXT"),
     ("messages", "tool_calls", "ALTER TABLE messages ADD COLUMN tool_calls INTEGER"),
     ("messages", "unverified_sources", "ALTER TABLE messages ADD COLUMN unverified_sources TEXT"),
+    ("messages", "turn_seq", "ALTER TABLE messages ADD COLUMN turn_seq INTEGER"),
+    ("messages", "request_id", "ALTER TABLE messages ADD COLUMN request_id TEXT"),
 )
+
+# 依赖**新增列**的索引必须放在迁移之后建：SCHEMA 里的 CREATE INDEX 在旧库上会
+# 先于 ALTER 执行，提示 "no such column: turn_seq"，服务直接起不来。
+INDEXES = """
+-- 同一轮的两条消息（user/assistant）共用一个 turn_seq，所以唯一键要带 role。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_turn
+    ON messages(conversation_id, turn_seq, role) WHERE turn_seq IS NOT NULL;
+-- 幂等键：同一会话里同一个 request_id 只允许落一轮，重试直接冲突被忽略。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_messages_request
+    ON messages(conversation_id, request_id) WHERE request_id IS NOT NULL;
+"""
 
 # get_trace 的显式列清单：原先用 `SELECT *` + 位置 zip，任何一次加列（就像上面这条迁移）
 # 都会让取值整体错位或直接 KeyError。这里改成显式列出，加列时必须同步改这里。
@@ -111,6 +130,7 @@ async def init_db() -> None:
                     # 这说明迁移已经由另一个进程完成，视为成功而不是启动失败。
                     if "duplicate column" not in str(exc).lower():
                         raise
+        await db.executescript(INDEXES)
         await db.commit()
     finally:
         await db.close()
@@ -125,8 +145,16 @@ async def save_turn(
     retrieved_sources: list[str] | None = None,
     tool_calls: int | None = None,
     unverified_sources: list[str] | None = None,
+    turn_seq: int | None = None,
+    request_id: str | None = None,
 ) -> None:
-    """记录一轮对话：新建/更新会话 + 追加 user/assistant 两条消息。"""
+    """记录一轮对话：新建/更新会话 + 追加 user/assistant 两条消息。
+
+    两条 INSERT 都带 `ON CONFLICT DO NOTHING`，靠 `uq_messages_turn` /
+    `uq_messages_request` 两个唯一索引去重：客户端超时重试、前端重发、取消后再点一次，
+    都不会在历史里堆出两轮一模一样的问答（此前 messages 表没有任何唯一约束，
+    同一次提问刷新页面看到两遍，是这套系统里最容易被截图的一类 bug）。
+    """
     now = "datetime('now', 'localtime')"
     db = await _conn()
     try:
@@ -141,13 +169,18 @@ async def save_turn(
             (conversation_id,),
         )
         await db.execute(
-            "INSERT INTO messages (conversation_id, role, content, sources) VALUES (?, 'user', ?, NULL)",
-            (conversation_id, user_content),
+            "INSERT INTO messages "
+            "(conversation_id, role, content, sources, turn_seq, request_id) "
+            "VALUES (?, 'user', ?, NULL, ?, ?) "
+            "ON CONFLICT DO NOTHING",
+            (conversation_id, user_content, turn_seq, request_id),
         )
         await db.execute(
             "INSERT INTO messages "
-            "(conversation_id, role, content, sources, retrieved_sources, tool_calls, unverified_sources) "
-            "VALUES (?, 'assistant', ?, ?, ?, ?, ?)",
+            "(conversation_id, role, content, sources, retrieved_sources, tool_calls, "
+            " unverified_sources, turn_seq, request_id) "
+            "VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT DO NOTHING",
             (
                 conversation_id,
                 answer,
@@ -157,6 +190,8 @@ async def save_turn(
                 tool_calls,
                 json.dumps(unverified_sources, ensure_ascii=False)
                 if unverified_sources is not None else None,
+                turn_seq,
+                request_id,
             ),
         )
         await db.commit()
@@ -202,13 +237,21 @@ async def list_sessions(limit: int = 50) -> list[dict]:
 
 
 async def get_messages(conversation_id: str) -> list[dict]:
-    """返回某会话全部消息（role/content/sources/时间），用于前端渲染历史。"""
+    """返回某会话全部消息（role/content/sources/时间），用于前端渲染历史。
+
+    排序先看 `turn_seq`（请求到达时分配的序号），再看 `id`：
+    同一会话的两个请求是串行跑图、**并发写库**的，后发起的那轮完全可能先 INSERT，
+    那时只按自增 id 排，历史里第 2 问会显示在第 1 问上面。
+    旧库没有 turn_seq 的消息值为 NULL，`ORDER BY turn_seq IS NULL, turn_seq, id`
+    把 NULL 排在最后、组内退回按 id，行为与改造前一致。
+    """
     db = await _conn()
     try:
         cur = await db.execute(
             "SELECT role, content, sources, retrieved_sources, tool_calls, "
             "unverified_sources, created_at FROM messages "
-            "WHERE conversation_id = ? ORDER BY id ASC",
+            "WHERE conversation_id = ? "
+            "ORDER BY turn_seq IS NULL, turn_seq ASC, id ASC",
             (conversation_id,),
         )
         rows = await cur.fetchall()

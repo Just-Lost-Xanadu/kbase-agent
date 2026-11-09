@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -17,6 +18,21 @@ async def lifespan(app: FastAPI):
 
     await store.init_db()
     yield
+    # 关停顺序很重要：先收掉"还在跑的懒初始化"，再关 runtime。
+    # 旧实现只 aclose 了 app.state.runtime：若此刻 services_task 正在建索引/拉 MCP 子进程，
+    # 它会在 runtime 关闭**之后**把这个新 runtime 写进 app.state（app.state.runtime = runtime），
+    # 于是新拉起的 MCP 子进程与 sqlite 连接再也没人关，日志里还会多一条
+    # "Task was destroyed but it is pending!"。cancel 之后必须 await（吞掉 CancelledError），
+    # 否则 cancel 只是"提了个请求"，任务可能还没退。
+    task = getattr(app.state, "services_task", None)
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass  # 这是我们自己 cancel 的，不是外层取消
+        except Exception:  # noqa: BLE001
+            pass
     runtime = getattr(app.state, "runtime", None)
     if runtime is not None:
         try:

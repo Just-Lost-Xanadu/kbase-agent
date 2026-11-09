@@ -350,7 +350,7 @@ API：
 - **RRF 把两路的排序合并**，两路都靠前的片段自然胜出——它在 k=3 上比最好的单路高 1.79 个点。
 
 > **这个消融能证明什么、不能证明什么（规模边界，先说清）**：整份语料库只有 **15,679 个字符**、
-> **40 个分块**、平均 **395 字符/块**、最长一块 **795 字符 < `chunk_size=800`**。也就是说这 40 块
+> **40 个分块**、平均 **392 字符/块**（15,679 ÷ 40）、最长一块 **795 字符 < `chunk_size=800`**。也就是说这 40 块
 > 实质是"39 篇各一块 + 员工手册多切了一块"——**在默认的 `chunk_size=800` 下，recursive 切分器
 > 从未真正切开过任何一篇文档**。
 > 所以本节结论的准确表述是：**"在 39 篇人工构造的近义干扰文档中，混合检索比单路更稳"**，
@@ -415,7 +415,7 @@ API：
 3. **`top_k` 与 `chunk_size` 要一起看**：块越小，同样 top_k 覆盖到的原文越少（k=3、cs=300 只看到
    900 字符），得靠多捞几个块来补召回；块越大则相反。单看任何一个都会得出片面的结论。
 
-> **这张表的边界**：它测的是"在这份 39 篇 / 1.5 万字的语料上"的切分敏感性，不是通用最优值。
+> **这张表的边界**：它测的是"在这份 39 篇 / 15,679 字符（约 1.6 万字）的语料上"的切分敏感性，不是通用最优值。
 > 尤其 `cs=1600` 那一档只有 39 个分块（38 篇本来就只有 1 块），所以它主要测的是
 > "块变得很大之后语义被稀释"，而不是"切分粒度"本身。
 
@@ -530,7 +530,15 @@ flowchart TD
   **同名去重与"子串匹配"的边界（如实说明）**：`matched_names` 现在按姓名去重，所以库里同一姓名有两条记录时不会再被误判成"问题里有多个姓名"而拒绝（重复行属于数据问题，交给数据侧修）；但身份匹配仍是**子串匹配**（`r["name"] in question`），因此存在误伤——问题里出现"张伟明"会命中员工"张伟"。生产化方向是实体抽取 + 唯一 ID，而不是子串包含。
   生产化方向：由会话层注入 `user_id` 并做行级过滤，而不是相信模型传进来的文本。**不对外宣称具备权限控制。**
 - 检索内容直接进 prompt，未做"不可信数据"隔离，因此 prompt 注入属于未防护面（列为方向）。
-- **同一 session 的并发请求已按 `thread_id` 串行**（`runtime._thread_lock`）：LangGraph 的 checkpoint 是"读快照 → 跑图 → 写回"，同 thread 并发会让后写覆盖先写、消息静默丢失；现在把"读 checkpoint → 跑图 → 取最终状态"整段放进同一把 per-thread 锁，不同 session 仍完全并发。边界仍在单进程内：多副本部署时这把锁不跨进程，需要换 Postgres checkpointer 并按 session 串行/入队。
+- **同一 session 的并发请求已按 `thread_id` 串行**（`runtime._thread_lock`）：LangGraph 的 checkpoint 是"读快照 → 跑图 → 写回"，同 thread 并发会让后写覆盖先写、消息静默丢失；现在把"读 checkpoint → 跑图 → 取最终状态"整段放进同一把 per-thread 锁，不同 session 仍完全并发。边界仍在单进程内：多副本部署时这把锁不跨进程，需要换 Postgres checkpointer 并按 session 串行/入队。一次性 thread（无 `session_id`，thread_id 是刚生成的 `oneshot-<uuid>`）用完即把锁从字典里摘掉——旧实现只加不删，每个匿名请求都留下一个永不释放的 `asyncio.Lock`。
+- **会话记录表的写入是幂等的、顺序是确定的**：`messages` 上有 `uq_messages_turn (conversation_id, turn_seq, role)` 与 `uq_messages_request (conversation_id, request_id)` 两个唯一索引，两条 INSERT 都带 `ON CONFLICT DO NOTHING`。
+  - `turn_seq` 在**请求到达时**取号（毫秒时间戳，且严格大于上次分配）：同一 session 的两个请求串行跑图、写库却在锁外，后发起的那轮完全可能先 INSERT；历史接口按 `turn_seq`（NULL 退回 `id`）排，才不会被写库顺序颠倒。
+  - `request_id` 是可选的客户端幂等键：带上它，超时重试/前端重发就不会在历史里堆出两轮一模一样的问答。
+- **关停顺序**：先 cancel 并 await 懒初始化 task，再 `runtime.aclose()`。旧实现只关 runtime——若关停瞬间初始化正在跑，它会在 runtime 关闭之后把新 runtime 写回 `app.state`，拉起的 MCP 子进程与 sqlite 连接再没人关（日志里还会有一条 `Task was destroyed but it is pending!`）。
+- **`session_id` 必须是"非空或省略"，不能传空字符串**（`max_length=128`）：空串在真值判断里为假，旧实现会静默把这一轮当成一次性会话——checkpoint 落 `oneshot-*` 后被回收、会话记录也不写，用户看到答案正常返回、刷新后历史全空，服务端一条错误都没有。现在直接 422。
+- **MCP 子进程的索引初始化失败会退出，而不是"起一个查不到东西的服务"**：旧实现在 `__main__` 里 `except Exception` 只把错误 print 到 stderr，然后照常 `mcp.run()`；父进程只做工具表握手，看不到子进程里的 `_pipeline is None`，于是 `retrieve_knowledge` 永远返回"检索管道未初始化"、而 `/api/health` 依旧是 ok。现在 `sys.exit(1)`，父进程的 `_spawn` 会抛 `ToolSessionUnavailable`（用户看到"工具暂时不可用"，而不是"知识库没有这个答案"）。
+- **`is_indexed()` 用严格计数，不吞向量库读异常**：它的 False 会触发 `index()`，而 `index()` 先 unlink sidecar 再 reset collection。Chroma 瞬时读不出来（另一个进程持锁、卷抖动）若被当成"索引不存在"，就从一个可恢复的读失败升级成**索引被删**。现在向量条数读失败直接上抛（sidecar 读不出来仍返回 False，那条路径的语义是清楚的）。
+- **耗时统计用 `time.monotonic()`**：`now_ms()` 原先用 `time.time()`，NTP 回拨/校时会让 `duration_ms` 变成负数、`started_at` 非单调。绝对时间由数据库里 `started_at` 的 `datetime('now')` 负责，内存里只算差值。
 - 多轮对话历史目前全量进上下文（checkpoint 保存全量消息）；超长会话建议后续加历史压缩/裁剪（如 summarize 节点或 max_turns 截断），列为方向。
 - 架构边界明确：当前是**单 Agent + MCP 工具层**；多 Agent 编排 / Skills / 工具失败重试与降级 / prompt 注入防护 / 鉴权限流 都**未实现**，只作为后续方向，不写进"已完成"能力。
 

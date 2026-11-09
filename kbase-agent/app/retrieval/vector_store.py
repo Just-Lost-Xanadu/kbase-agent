@@ -79,17 +79,26 @@ class VectorStore:
         )
 
     def count(self) -> int:
-        """当前 collection 的向量条数。
+        """当前 collection 的向量条数；读不出来按 0 处理。
 
-        这里仍然把"读不出来"和"确实是空"合并成 0，是**有意**的：调用方 `is_indexed()`
-        本来就 `except Exception: return False`，两者都会走到"服务自动重建索引"这条
-        自愈路径上（等价结果，没必要分两套）。真正需要区分成功/失败的是 reset()，见上。
+        这个宽松语义只留给"不区分失败与为空也无所谓"的调用方。真正需要区分的场合
+        （`is_indexed()` 决定要不要**删掉 sidecar 重建索引**）请用 `count_strict()`：
+        Chroma 抖动被读成 0 时，宽松版会让服务误以为索引不存在，进而 unlink sidecar +
+        reset collection —— 一次瞬时故障就升级成索引丢失。
         """
         try:
-            self._ensure_collection()
-            return self._collection.count()
-        except Exception:  # noqa: BLE001  # 读不出来与确实是空在这里等价：is_indexed() 同样会走自动重建
+            return self.count_strict()
+        except Exception:  # noqa: BLE001
             return 0
+
+    def count_strict(self) -> int:
+        """向量条数；读不出来就抛异常（不吞）。
+
+        与 `count()` 分开而不是加个参数：`count()` 的宽松语义是给测试替身与旧调用方的，
+        而"读失败必须上抛"这条要能被 `is_indexed()` 明确地选到。
+        """
+        self._ensure_collection()
+        return self._collection.count()
 
     def add(self, chunks: list[dict]) -> None:
         """把分块连同 metadata（source / chunk_id / method）写入向量库。

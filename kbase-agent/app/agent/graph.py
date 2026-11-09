@@ -950,6 +950,19 @@ class AgentRuntime:
             self._thread_locks[thread_id] = lock
         return lock
 
+    def _drop_oneshot_lock(self, thread_id: str, session_id: str | None) -> None:
+        """一次性 thread（无 session_id）跑完就把锁对象摘掉。
+
+        为什么必须有这一步：无 session 的请求每轮都会 `uuid4().hex` 出一个**全新**
+        thread_id，于是 `_thread_locks` 每轮多一个永不释放的 `asyncio.Lock`——
+        内存随请求数线性增长，长跑的服务只是慢慢涨，没有任何报错。
+        只对 one-shot 生效：它的 thread_id 是刚生成的一次性 UUID，**不存在第二个等待者**，
+        所以 pop 掉不会让谁和别人共用新锁（有 session 的 thread 可能还有排队请求，
+        那种情况一律保留锁对象）。
+        """
+        if session_id is None:
+            self._thread_locks.pop(thread_id, None)
+
     def _config(self, session_id: str | None) -> dict:
         return {
             "configurable": {"thread_id": session_id or uuid.uuid4().hex},
@@ -1002,17 +1015,20 @@ class AgentRuntime:
         # 先确定 thread_id，再拿它的锁：同一线程必须把"读 checkpoint → 跑图 → 取最终状态"
         # 整段串行化，否则并发请求会互相覆盖 checkpoint（见 __init__ 的说明）。
         thread_id = session_id or uuid.uuid4().hex
-        async with self._thread_lock(thread_id):
-            lc_messages, config, prior = await self._build_input(messages, thread_id)
-            # tool_call_count 每轮显式置 0：它是"本轮"执行数，不能沿用 checkpoint 里的上一轮值。
-            state = await self.graph.ainvoke(
-                {"messages": lc_messages, "tool_call_count": 0}, config=config
-            )
-            final_messages = state["messages"]
-            # 答案与来源都只从本轮新增的消息里取：
-            # sources 不累计历史轮次；answer 也不回退到上一轮（见 _final_answer 说明）
-            fresh = final_messages[prior:]
-            return self._result(fresh, state.get("tool_call_count", 0))
+        try:
+            async with self._thread_lock(thread_id):
+                lc_messages, config, prior = await self._build_input(messages, thread_id)
+                # tool_call_count 每轮显式置 0：它是"本轮"执行数，不能沿用 checkpoint 里的上一轮值。
+                state = await self.graph.ainvoke(
+                    {"messages": lc_messages, "tool_call_count": 0}, config=config
+                )
+                final_messages = state["messages"]
+                # 答案与来源都只从本轮新增的消息里取：
+                # sources 不累计历史轮次；answer 也不回退到上一轮（见 _final_answer 说明）
+                fresh = final_messages[prior:]
+                return self._result(fresh, state.get("tool_call_count", 0))
+        finally:
+            self._drop_oneshot_lock(thread_id, session_id)
 
     @staticmethod
     def _result(fresh: list, tool_call_count: int | None = None) -> dict:
@@ -1058,20 +1074,24 @@ class AgentRuntime:
         thread_id = session_id or uuid.uuid4().hex
         # 与 ainvoke 同口径：整条流式运行期间持有该 thread 的锁。
         # 客户端断连时 async for 被取消，async with 会正常释放锁。
-        async with self._thread_lock(thread_id):
-            lc_messages, config, prior = await self._build_input(messages, thread_id)
-            async for update in self.graph.astream(
-                {"messages": lc_messages, "tool_call_count": 0},
-                config=config,
-                stream_mode="updates",
-            ):
-                yield update
-            # 图跑完后从 checkpoint 取最终状态，避免再跑一次
-            snapshot = await self.graph.aget_state(config)
-            values = snapshot.values or {}
-            final_messages = values.get("messages", [])
-            # 与 ainvoke 同口径：答案与来源都只看本轮新增消息
-            yield self._result(final_messages[prior:], values.get("tool_call_count", 0))
+        try:
+            async with self._thread_lock(thread_id):
+                lc_messages, config, prior = await self._build_input(messages, thread_id)
+                async for update in self.graph.astream(
+                    {"messages": lc_messages, "tool_call_count": 0},
+                    config=config,
+                    stream_mode="updates",
+                ):
+                    yield update
+                # 图跑完后从 checkpoint 取最终状态，避免再跑一次
+                snapshot = await self.graph.aget_state(config)
+                values = snapshot.values or {}
+                final_messages = values.get("messages", [])
+                # 与 ainvoke 同口径：答案与来源都只看本轮新增消息
+                yield self._result(final_messages[prior:], values.get("tool_call_count", 0))
+        finally:
+            # 生成器被取消/提前关闭时这里也会执行：否则流式请求的 one-shot 锁同样会漏
+            self._drop_oneshot_lock(thread_id, session_id)
 
     async def aclose_thread(self, session_id: str) -> None:
         """删掉某个 session 的 checkpoint 线程（评测/回归专用）。

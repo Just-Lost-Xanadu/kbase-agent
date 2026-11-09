@@ -1,10 +1,11 @@
 import asyncio
 import json
+import time
 import uuid
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
 from app.services import ensure_services
@@ -38,7 +39,38 @@ class ChatRequest(BaseModel):
         min_length=1,
         description="最新用户输入（同一 session 请只追加最新一条；历史由服务端按 session 续接）",
     )
-    session_id: str | None = None
+    # max_length：session_id 会直接当 SQLite 主键与 LangGraph 的 thread_id 用，
+    # 此前没有任何长度上限。
+    session_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="会话 id；不带会话请省略（null），不要传空字符串",
+    )
+    # 幂等键：客户端重试/重发时带上同一个值，服务端就只会落一轮历史。
+    request_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "可选幂等键。同一 session 内相同 request_id 只写一轮历史；"
+            "不传则不去重（每次请求都算新的一轮）"
+        ),
+    )
+
+    @field_validator("session_id")
+    @classmethod
+    def _validate_session_id(cls, value: str | None) -> str | None:
+        """空字符串必须拒绝，不能当成"没有会话"。
+
+        这是最贵的一种"静默降级"：`session_id=""` 在真值判断里为假 → 本轮被当成一次性
+        会话（thread 落 `oneshot-*`），跑完 `_reclaim_one_shot` 把 checkpoint 删掉、
+        `_record_turn` 也直接 return。前端"清空会话 id 再发"或某处拼接出错时，
+        用户看到的是答案正常返回、刷新后历史全空，而服务端日志里连一条错误都没有。
+        """
+        if value is not None and not value.strip():
+            raise ValueError(
+                "session_id 不能是空字符串；开新会话请省略该字段（传 null）"
+            )
+        return value
 
     @model_validator(mode="after")
     def _validate_messages(self) -> "ChatRequest":
@@ -101,6 +133,21 @@ def _question_of(req: ChatRequest) -> str:
     )
 
 
+# 轮次序号：请求**到达时**分配，用来给历史消息定序。
+# 为什么不能靠 messages.id 自增：同一会话的两个请求是串行跑图、写库却发生在锁外，
+# 后发起的那轮完全可能先 INSERT（见 store.get_messages 的说明）。
+# 值取"当前毫秒、且严格大于上次分配"，既保证进程内单调，又避免重启后从 1 开始
+# 与库里已有 turn_seq 撞 uq_messages_turn。
+_turn_seq_last = 0
+
+
+def _next_turn_seq() -> int:
+    global _turn_seq_last
+    candidate = int(time.time() * 1000)
+    _turn_seq_last = max(candidate, _turn_seq_last + 1)
+    return _turn_seq_last
+
+
 def _thread_of(req: ChatRequest) -> tuple[str, bool]:
     """定本次运行的 LangGraph thread_id，并标记它是否为"一次性"。
 
@@ -125,7 +172,9 @@ async def _reclaim_one_shot(runtime, thread_id: str, ephemeral: bool) -> None:
         await runtime.aclose_thread(thread_id)
 
 
-async def _record_turn(req: ChatRequest, result: dict) -> None:
+async def _record_turn(
+    req: ChatRequest, result: dict, turn_seq: int | None = None
+) -> None:
     """把一轮对话写入会话记录表（仅显式带 session_id 的请求；供读历史接口用）。
 
     除了答案引用，也保存检索命中、执行次数与"查无此据"：历史消息渲染要和实时响应
@@ -145,6 +194,8 @@ async def _record_turn(req: ChatRequest, result: dict) -> None:
         retrieved_sources=result.get("retrieved_sources", []) or [],
         tool_calls=result.get("tool_calls", 0),
         unverified_sources=result.get("unverified_sources", []) or [],
+        turn_seq=turn_seq,
+        request_id=req.request_id,
     )
 
 
@@ -171,7 +222,9 @@ async def _save_trace(
     )
 
 
-async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
+async def _persist(
+    req: ChatRequest, rec, result: dict | None, turn_seq: int | None = None
+) -> None:
     """落库：有答案才写会话记录，trace 则无论成败都写（记录失败不影响主流程）。
 
     result=None 表示本轮没有产出答案（执行失败或客户端断连）——此时只写 trace，
@@ -192,7 +245,7 @@ async def _persist(req: ChatRequest, rec, result: dict | None) -> None:
     # 本函数 docstring 声明不会出现的"只有问题没有答案"，前端预览也会是空串。
     if result is not None and (answer or "").strip():
         try:
-            await _record_turn(req, result)
+            await _record_turn(req, result, turn_seq)
         except Exception:  # noqa: BLE001, S110
             pass
     try:
@@ -215,6 +268,8 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
     rec = Recorder(question=_question_of(req))
     token = set_recorder(rec)
     thread_id, ephemeral = _thread_of(req)
+    # 在**发起运行之前**取号：这样历史顺序 = 用户发起的顺序，而不是"谁先写完库"
+    turn_seq = _next_turn_seq()
     result: dict | None = None
     try:
         result = await runtime.ainvoke(
@@ -226,18 +281,18 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
         # 客户端中途断开：checkpoint 可能已由 graph 提交，trace 不能丢。
         # CancelledError 属 BaseException，不会被下面的 except Exception 捕获，故单列；
         # shield 保证这次写入不被取消打断。
-        await asyncio.shield(_persist(req, rec, None))
+        await asyncio.shield(_persist(req, rec, None, turn_seq))
         raise
     except Exception as exc:
         rec.error = str(exc)[:300]
-        await asyncio.shield(_persist(req, rec, None))
+        await asyncio.shield(_persist(req, rec, None, turn_seq))
         raise HTTPException(status_code=502, detail=f"Agent 执行失败：{exc}") from exc
     finally:
         reset_recorder(token)
         # 一次性 thread 的回收放在 finally：失败与取消路径同样不该把孤儿留在库里
         await _reclaim_one_shot(runtime, thread_id, ephemeral)
     # 成功路径同样 shield：答案已产出，此刻若客户端断开也不能丢掉这次 trace
-    await asyncio.shield(_persist(req, rec, result))
+    await asyncio.shield(_persist(req, rec, result, turn_seq))
     return ChatResponse(
         answer=result["answer"],
         sources=result["sources"],
@@ -263,6 +318,8 @@ async def chat_stream(req: ChatRequest, request: Request):
 
         rec = Recorder(question=_question_of(req))
         token = set_recorder(rec)
+        # 与同步端点同口径：在开始跑图之前取号
+        turn_seq = _next_turn_seq()
         persisted = False
         try:
             async for update in runtime.astream(
@@ -273,7 +330,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     # 否则同一次运行会落两条 trace（后一条答案为空）。
                     # shield 与同步端点同理：答案已产出，此刻客户端断开也不能丢掉这次 trace。
                     persisted = True
-                    await asyncio.shield(_persist(req, rec, update))
+                    await asyncio.shield(_persist(req, rec, update, turn_seq))
                     yield {"event": "done", "data": json.dumps(update, ensure_ascii=False)}
                     continue
                 for node, payload in update.items():
@@ -299,7 +356,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             # 不会被上面的 except 捕获），finally 里 `not persisted` 会再排一个后台 _persist，
             # 于是同一次运行落两条 trace（后一条答案为空）。shield 则保证写入本身不被取消打断。
             persisted = True
-            await asyncio.shield(_persist(req, rec, None))
+            await asyncio.shield(_persist(req, rec, None, turn_seq))
             yield {
                 "event": "error",
                 "data": json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False),
@@ -312,7 +369,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 # 交给后台任务补写 trace，避免这次运行在 /api/runs 里查不到。
                 # 必须持有强引用：asyncio 只保留弱引用，任务可能在完成前被 GC 掉。
                 try:
-                    task = asyncio.create_task(_persist(req, rec, None))
+                    task = asyncio.create_task(_persist(req, rec, None, turn_seq))
                 except RuntimeError:
                     pass  # 事件循环已关闭，补写无望
                 else:

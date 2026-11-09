@@ -227,6 +227,17 @@ if __name__ == "__main__":
         pipeline = RetrievalPipeline()
         pipeline.ensure_ready()
         set_pipeline(pipeline)
-    except Exception as exc:  # noqa: BLE001  # 启动期索引/依赖不可用也要照常起服务，只把原因写到 stderr
-        print(f"[mcp] 检索索引暂不可用，retrieve_knowledge 将返回错误：{exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        # 这里**必须退出**，不能"照常起服务"。
+        # 旧实现只往 stderr 打一行就 `mcp.run()`：父进程 create_runtime 只做工具表握手，
+        # 看不到子进程里 `_pipeline is None`，于是 retrieve_knowledge 永远返回
+        # "错误：检索管道未初始化。"，而 /api/health 依旧 ok、日志里只有一行 stderr。
+        # 症状会被读成"知识库里没有这条"，而不是"工具根本没起来"——这是最难排查的一种。
+        # 退出后父进程的 _spawn 会抛 ToolSessionUnavailable，用户看到的是
+        # "工具暂时不可用"（真话），而不是一个伪造的空检索结果。
+        print(
+            f"[mcp] 检索索引初始化失败，本 server 无法提供 retrieve_knowledge：{exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     mcp.run()  # 默认 stdio 传输：被 `python -m app.mcp.servers` 拉起
